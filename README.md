@@ -11,6 +11,10 @@ Mobile app for recording roulette spins per casino and dealer, reviewing statist
 
 The two builds keep separate records. Move them with **Menu → Export backup** in one and **Restore or merge a backup** in the other.
 
+## Live app
+
+https://jayzhou2309.github.io/roulette-dealer-app/ (opens the app in `dist/pwa/`; works whether Pages deploys from the branch or from GitHub Actions)
+
 ## Hosting the home-screen app
 
 Upload the contents of `dist/pwa/` to any static HTTPS host (GitHub Pages, Netlify, Cloudflare Pages). It must be served over HTTPS for install and offline use.
