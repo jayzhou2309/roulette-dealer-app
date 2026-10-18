@@ -84,6 +84,12 @@ for (const scheme of ['light', 'dark']) {
     await page.click('.tab[data-tab="predict"]');
     await page.waitForSelector('text=Suggested bet');
     await page.locator('.pick-card').screenshot({ path: shot + 'pick-dark.png' });
+    await page.click('.chip[data-act="model"][data-v="weighted"]');
+    await page.click('.chip[data-act="halflife"][data-v="25"]');
+    await page.waitForSelector('text=Weight on recent spins');
+    console.log('model row:', (await page.textContent('table.tbl tbody tr:has-text("Model")')).replace(/\s+/g, ' ').trim());
+    console.log('backtest rows:', (await page.$$eval('section:has(h2:text("Backtest")) tbody tr', (r) => r.map((x) => x.innerText.replace(/\s+/g, ' ')))).join(' | '));
+    await page.locator('section.card:has(.chip[data-act="halflife"])').screenshot({ path: shot + 'weighted-controls-dark.png' });
     await page.click('.chip[data-v="t3"]');
     await page.fill('#stake', '25'); await page.press('#stake', 'Tab');
     await page.waitForSelector('text=Top 3 numbers by estimate');

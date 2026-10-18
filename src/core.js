@@ -3,12 +3,14 @@ const Core = (() => {
   const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
   const DOUBLE_ZERO = 37;
   const EPS = 1e-6; // probability floor so log loss stays finite
-  const MODEL_VERSION = { baseline: '1.0', frequency: '1.0', smoothed: '1.0' };
+  const MODEL_VERSION = { baseline: '1.0', frequency: '1.0', smoothed: '1.0', weighted: '1.0' };
   const MODELS = [
     { id: 'baseline', name: 'Baseline', desc: 'Theoretical fair-wheel probability for every pocket.' },
     { id: 'frequency', name: 'Historical frequency', desc: 'Share of past spins that landed on each pocket.' },
     { id: 'smoothed', name: 'Smoothed frequency', desc: 'Past counts plus α pseudo-spins per pocket, pulling small samples toward the baseline.' },
+    { id: 'weighted', name: 'Recency-weighted', desc: 'Recent spins count more: a spin one half-life ago counts half as much as the latest. Plus α pseudo-spins per pocket.' },
   ];
+  const DEFAULT_HALF_LIFE = 50;
 
   function wheel(type) {
     const size = type === 'US' ? 38 : 37;
@@ -187,12 +189,45 @@ const Core = (() => {
   }
 
   // ---- models ----
+  // Decayed counts: the latest spin weighs 1, a spin `age` spins earlier weighs 0.5^(age / halfLife).
+  // nEff is the effective sample size, (Σw)² / Σw², used for honest uncertainty.
+  function weightedCounts(pockets, size, halfLife = DEFAULT_HALF_LIFE) {
+    const d = Math.pow(0.5, 1 / halfLife), c = new Array(size).fill(0);
+    let wt = 1, S = 0, S2 = 0;
+    for (let i = pockets.length - 1; i >= 0; i--) { c[pockets[i]] += wt; S += wt; S2 += wt * wt; wt *= d; }
+    return { c, S, nEff: S2 ? (S * S) / S2 : 0 };
+  }
+
+  // Sliding-window decayed counts, updated one spin at a time (for walk-forward replays).
+  function decayTracker(N, halfLife, W) {
+    const d = Math.pow(0.5, 1 / halfLife), dW = Number.isFinite(W) ? Math.pow(d, W) : 0;
+    const c = new Array(N).fill(0), q = [];
+    let S = 0, head = 0;
+    return {
+      c,
+      total: () => S,
+      push(p) {
+        for (let j = 0; j < N; j++) c[j] *= d;
+        S = S * d + 1; c[p] += 1; q.push(p);
+        if (q.length - head > W) {
+          const o = q[head++];
+          c[o] -= dW; S -= dW;
+          if (c[o] < 1e-9) c[o] = 0;
+        }
+      },
+    };
+  }
+
   function predict(model, pockets, w, params = {}) {
     const N = w.size;
     if (model === 'baseline' || !pockets.length) return new Array(N).fill(1 / N);
+    const a = params.alpha ?? 5;
+    if (model === 'weighted') {
+      const { c, S } = weightedCounts(pockets, N, params.halfLife ?? DEFAULT_HALF_LIFE);
+      return c.map((x) => (x + a) / (S + a * N));
+    }
     const c = counts(pockets, N), n = pockets.length;
     if (model === 'frequency') return c.map((x) => x / n);
-    const a = params.alpha ?? 5;
     return c.map((x) => (x + a) / (n + a * N));
   }
 
@@ -205,8 +240,9 @@ const Core = (() => {
     const W = win === 'all' || !win ? Infinity : win;
     const c = new Array(N).fill(0);
     let n = 0, sumSq = 0, lo = 0;
-    const res = { baseline: [], frequency: [], smoothed: [] };
-    const br = { baseline: [], frequency: [], smoothed: [] };
+    const res = { baseline: [], frequency: [], smoothed: [], weighted: [] };
+    const br = { baseline: [], frequency: [], smoothed: [], weighted: [] };
+    const wt = decayTracker(N, params.halfLife ?? DEFAULT_HALF_LIFE, W);
     const add = (p, d) => { sumSq += 2 * d * c[p] + 1; c[p] += d; n += d; };
     for (let i = 0; i < pockets.length; i++) {
       if (i >= minHistory) {
@@ -219,7 +255,14 @@ const Core = (() => {
         const D = n + a * N, ps = (c[y] + a) / D;
         res.smoothed.push(logLoss(ps));
         br.smoothed.push((sumSq + 2 * a * n + N * a * a) / (D * D) - 2 * ps + 1);
+        const DW = wt.total() + a * N;
+        let sq = 0;
+        for (let j = 0; j < N; j++) sq += ((wt.c[j] + a) / DW) ** 2;
+        const pw = (wt.c[y] + a) / DW;
+        res.weighted.push(logLoss(pw));
+        br.weighted.push(sq - 2 * pw + 1);
       }
+      wt.push(pockets[i]);
       add(pockets[i], 1);
       if (n > W) add(pockets[lo++], -1);
     }
@@ -318,10 +361,12 @@ const Core = (() => {
 
   // Walk-forward record of "bet the pick" and "bet the best k-sector". Frequency and smoothed
   // models rank pockets identically, so one record covers both.
-  function pickBacktest(pockets, w, win, k, minHistory = 20, mode = 'arc') {
+  // halfLife set → rank by decayed counts (Recency-weighted model), otherwise by plain counts.
+  function pickBacktest(pockets, w, win, k, minHistory = 20, mode = 'arc', halfLife = null) {
     const N = w.size, order = WHEEL_ORDER[w.type];
     const W = win === 'all' || !win ? Infinity : win;
-    const c = new Array(N).fill(0), last = new Array(N).fill(-1);
+    const tracker = halfLife ? decayTracker(N, halfLife, W) : null;
+    const c = tracker ? tracker.c : new Array(N).fill(0), last = new Array(N).fill(-1);
     let lo = 0, n = 0, scored = 0, pickHits = 0, sectorHits = 0;
     for (let i = 0; i < pockets.length; i++) {
       if (i >= minHistory) {
@@ -352,8 +397,9 @@ const Core = (() => {
           }
         }
       }
-      c[pockets[i]]++; last[pockets[i]] = i; n++;
-      if (n > W) { c[pockets[lo++]]--; n--; }
+      last[pockets[i]] = i;
+      if (tracker) tracker.push(pockets[i]);
+      else { c[pockets[i]]++; n++; if (n > W) { c[pockets[lo++]]--; n--; } }
     }
     return {
       scored, k, pickHits, sectorHits,
@@ -388,7 +434,7 @@ const Core = (() => {
     DOUBLE_ZERO, EPS, MODELS, MODEL_VERSION, GROUPS,
     wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
     categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
-    predict, logLoss, brier, backtest, evaluate, mean, rng,
+    predict, logLoss, brier, backtest, evaluate, mean, rng, weightedCounts, DEFAULT_HALF_LIFE,
     WHEEL_ORDER, pick, bestSector, betEconomics, binomUpper, pickBacktest, hotCold,
   };
 })();

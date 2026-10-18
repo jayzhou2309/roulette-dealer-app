@@ -48,6 +48,10 @@ Order follows the PRD's direction: CRM and reliable spin history first, analytic
 - [x] T32 Core `hotCold` with tie rules and Bonferroni-adjusted binomial tails — R4.7–R4.8
 - [x] T33 Stats "Hot and cold" card and Record-tab hot/cold line — R4.7–R4.9
 
+## Phase 5e — Recency weighting (change request)
+- [x] T34 Core: `weightedCounts`, decay tracker, `weighted` model in predict/backtest, weighted pick record — R5.1, R5.9
+- [x] T35 Predict: model chip, half-life chips with weight-by-age readout, effective n, saved params — R5.1, R5.3
+
 ## Phase 6 — Ship
 - [x] T24 Build script inlines modules into `dist/index.html`
 - [x] T25 Playwright smoke test at phone width, light + dark

@@ -254,3 +254,43 @@ test('hot and cold numbers', () => {
   const biased = fair.map((p, i) => (i % 9 === 0 ? 17 : p));
   assert.ok(C.hotCold(biased, EU).hot[0].pocket === 17 && C.hotCold(biased, EU).hot[0].pAdj < 0.01);
 });
+
+test('recency-weighted model favours recent hits', () => {
+  // 5 hit four times long ago, 9 hit three times recently
+  const hist = [5, 5, 5, 5, ...Array.from({ length: 54 }, (_, i) => 10 + (i % 27)), 9, 9, 9];
+  assert.equal(C.pick(C.predict('frequency', hist, EU), hist, EU).pocket, 5);
+  const pw = C.predict('weighted', hist, EU, { alpha: 5, halfLife: 10 });
+  close(pw.reduce((a, b) => a + b, 0), 1);
+  assert.equal(C.pick(pw, hist, EU).pocket, 9);
+  // a very long half-life approaches the smoothed model
+  const ps = C.predict('smoothed', hist, EU, { alpha: 5 });
+  const pl = C.predict('weighted', hist, EU, { alpha: 5, halfLife: 1e9 });
+  ps.forEach((x, i) => close(x, pl[i], 1e-6));
+  const wc = C.weightedCounts([1, 2], 37, 1);
+  close(wc.c[2], 1); close(wc.c[1], 0.5); close(wc.nEff, 2.25 / 1.25);
+});
+
+test('weighted backtest and pick record match a brute-force replay', () => {
+  const r = C.rng(17);
+  const pockets = Array.from({ length: 260 }, () => Math.floor(r() * 37));
+  for (const win of [100, 'all']) {
+    const bt = C.backtest(pockets, EU, win, { alpha: 3, halfLife: 30 });
+    let ll = 0, bs = 0, m = 0, ph = 0, sh = 0, scored = 0;
+    for (let i = 20; i < pockets.length; i++) {
+      const h = C.windowed(pockets.slice(0, i), win);
+      const p = C.predict('weighted', h, EU, { alpha: 3, halfLife: 30 });
+      ll += C.logLoss(p[pockets[i]]); bs += C.brier(p, pockets[i]); m++;
+      const pk = C.pick(p, h, EU);
+      if (!pk) continue;
+      scored++;
+      if (pk.pocket === pockets[i]) ph++;
+      if (C.bestSector(p, EU, 5, pk.pocket, 'neighbours').pockets.includes(pockets[i])) sh++;
+    }
+    close(bt.models.weighted.logLoss, ll / m, 1e-9);
+    close(bt.models.weighted.brier, bs / m, 1e-9);
+    const pb = C.pickBacktest(pockets, EU, win, 5, 20, 'neighbours', 30);
+    assert.equal(pb.scored, scored);
+    assert.equal(pb.pickHits, ph);
+    assert.equal(pb.sectorHits, sh);
+  }
+});

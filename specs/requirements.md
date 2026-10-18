@@ -66,15 +66,15 @@ Format: user stories with EARS acceptance criteria. IDs trace to PRD sections.
 
 ## R5 Prediction engine (PRD §4.5, P0)
 
-1. The app shall offer three models: **Baseline** (1/37 or 1/38), **Historical frequency** (empirical), **Smoothed frequency** (additive smoothing toward the baseline with configurable strength).
+1. The app shall offer four models: **Baseline** (1/37 or 1/38), **Historical frequency** (empirical), **Smoothed frequency** (additive smoothing toward the baseline with configurable strength), and **Recency-weighted** (each spin weighted 0.5^(age / half-life), half-life selectable 10/25/50/100/250 spins, plus the same smoothing). Recency-weighted is the default.
 2. The app shall show per-pocket probabilities and category probabilities, each next to the baseline.
-3. Each estimate shall show: model and version, window, sample size, analysis period (first–last spin), generation time, and a 95% interval for each pocket's observed rate.
+3. Each estimate shall show: model and version, its parameters (α, half-life), the effective sample size for the weighted model, window, sample size, analysis period (first–last spin), generation time, and a 95% interval for each pocket's observed rate.
 4. The app shall run a walk-forward backtest: each spin is scored using only spins before it. Report log loss and Brier score for each model and the difference against baseline.
 5. A model shall be labelled "beats baseline" only when its backtest log loss is lower than baseline's by more than two standard errors of the paired difference; otherwise the app shall say there is no evidence of an edge.
 6. The app shall always show a statement that past spins do not change the probabilities of a fair wheel and that no estimate guarantees a win.
 7. **Suggested bet:** For a history-based model, the app shall show one pick (highest estimate; ties go to the most recently seen pocket) and a sector, highlighted on a wheel diagram and on the betting-table layout.
 8. Multi-number options: *Neighbours* (pick plus 2 pockets either side in wheel order), *Top 3 / Top 5* (highest estimates anywhere, pick first), or the strongest contiguous 7, 9 or 12 pockets on the wheel.
-9. The app shall show the walk-forward hit rate of "bet the pick" and "bet the sector" for that dealer against chance (1/N and k/N), flagging only results with a one-sided binomial p < 0.01.
+9. The pick and multi-number bets shall rank pockets by the selected model (weighted scores for Recency-weighted). The app shall show the walk-forward hit rate of "bet the pick" and "bet the sector" for that dealer against chance (1/N and k/N), flagging only results with a one-sided binomial p < 0.01.
 10. When the baseline model is selected, or all pockets are tied, the app shall show no pick.
 11. **Cost and payout:** Given a chip value per number (default 10), the app shall show for the pick and for the multi-number bet: cost per spin, amount paid back on a hit (36 × chip, straight up at 35 to 1), profit if it hits, loss if it misses, hit chance (model and fair wheel), expected result per spin at fair odds and under the model's estimate, and the net result of replaying the rule over the dealer's past spins.
 12. Saved estimates shall store the chip value and show the win/loss of the pick and the multi-number bet once scored.

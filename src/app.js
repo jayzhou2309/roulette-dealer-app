@@ -46,7 +46,7 @@
   let lastTap = { p: null, at: 0 };
 
   function loadPrefs() {
-    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'smoothed', alpha: 5, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10 };
+    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'weighted', alpha: 5, halfLife: 50, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10 };
     try { return Object.assign(d, JSON.parse(localStorage.getItem('rda.prefs') || '{}')); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem('rda.prefs', JSON.stringify({ ...prefs, view: V })); } catch { /* convenience only */ } }
@@ -499,6 +499,11 @@
       <section class="card stack"><h2>Window comparison</h2>${compare}</section>`;
   }
 
+  // Parameters for the selected model, as passed to Core.predict / Core.backtest.
+  const HALF_LIVES = [10, 25, 50, 100, 250];
+  const modelParams = () => ({ alpha: prefs.alpha, halfLife: prefs.halfLife || C.DEFAULT_HALF_LIFE });
+  const paramText = (model, params) => model === 'weighted' ? ` · half-life ${params.halfLife} · α=${params.alpha}` : model === 'smoothed' ? ` · α=${params.alpha}` : '';
+
   // ----- suggested bet -----
   const BET_OPTS = [
     { key: 'n5', mode: 'neighbours', k: 5, label: 'Neighbours (5)' },
@@ -572,7 +577,9 @@
     }
     const sec = C.bestSector(probs, w, k, pk0.pocket, opt.mode, C.gaps(pockets, w));
     const cnt = C.counts(pockets, w.size);
-    const bt = C.pickBacktest(all.map((s) => s.pocket), w, win, k, 20, opt.mode);
+    const weighted = prefs.model === 'weighted';
+    const bt = C.pickBacktest(all.map((s) => s.pocket), w, win, k, 20, opt.mode, weighted ? modelParams().halfLife : null);
+    const wcount = weighted ? C.weightedCounts(pockets, w.size, modelParams().halfLife).c[pk0.pocket] : null;
     const e1 = C.betEconomics(1, stake, pk0.p), eK = C.betEconomics(k, stake, sec.p);
     const f1 = C.betEconomics(1, stake, 1 / w.size), fK = C.betEconomics(k, stake, k / w.size);
     const secName = opt.mode === 'neighbours' ? 'Neighbours' : opt.mode === 'top' ? `Top ${k}` : `Best ${k}`;
@@ -607,7 +614,7 @@
       <div class="pick-hero">${pk(pk0.pocket, 'xl')}<div class="stack" style="gap:2px;min-width:0">
         <span class="eyebrow">Single number · ${money(stake, false)} chip pays ${money(35 * stake, false)}</span>
         <span><b class="num">${pct(pk0.p, 2)}</b> estimate vs <span class="num">${pct(1 / w.size, 2)}</span> fair</span>
-        <span class="small muted">Seen ${cnt[pk0.pocket]} times in ${win === 'all' ? 'all' : `the last ${win}`} spins${pk0.tied > 1 ? `; tied with ${pk0.tied - 1} other${pk0.tied > 2 ? 's' : ''}, picked the most recent` : ''}.</span></div></div>
+        <span class="small muted">Seen ${cnt[pk0.pocket]} times in ${win === 'all' ? 'all' : `the last ${win}`} spins${weighted ? ` · recency-weighted score ${wcount.toFixed(1)}` : ''}${pk0.tied > 1 ? `; tied with ${pk0.tied - 1} other${pk0.tied > 2 ? 's' : ''}, picked the most recent` : ''}.</span></div></div>
       <div class="stack" style="gap:6px"><span class="eyebrow">Multi-number bet</span>
         <div class="chips" role="group" aria-label="Multi-number bet">${BET_OPTS.map((o) => `<button class="chip" data-act="sector" data-v="${o.key}" aria-pressed="${opt.key === o.key}">${o.label}</button>`).join('')}</div></div>
       ${wheelSvg(w, sec, pk0.pocket)}
@@ -625,29 +632,33 @@
     const w = wheelOf(d);
     const win = prefs.pwin[d.id] ?? 100;
     const model = prefs.model;
-    const alpha = prefs.alpha;
+    const params = modelParams();
+    const alpha = params.alpha;
     const all = spinsOf(d.id);
     const sp = C.windowed(all, win);
     const pockets = sp.map((s) => s.pocket);
     const n = pockets.length;
-    const probs = C.predict(model, pockets, w, { alpha });
+    const probs = C.predict(model, pockets, w, params);
     const base = 1 / w.size;
     const cnt = C.counts(pockets, w.size);
+    // Uncertainty: for the weighted model, scale weighted hits to the effective sample size.
+    const wcs = model === 'weighted' ? C.weightedCounts(pockets, w.size, params.halfLife) : null;
+    const ci = (p) => (wcs ? C.wilson((wcs.c[p] * wcs.nEff) / wcs.S, wcs.nEff) : C.wilson(cnt[p], n));
     const order = w.pockets.slice().sort((a, b) => probs[b] - probs[a] || a - b);
     const top = order.slice(0, 10);
     const modelInfo = C.MODELS.find((m) => m.id === model);
-    const domain = Math.max(base, ...top.map((p) => Math.max(probs[p], n ? C.wilson(cnt[p], n)[1] : 0))) * 1.12;
+    const domain = Math.max(base, ...top.map((p) => Math.max(probs[p], n ? ci(p)[1] : 0))) * 1.12;
 
     const pocketBars = model === 'baseline'
       ? `<p class="small" style="margin:0">Every pocket: <b class="num">${pct(base, 2)}</b>. The baseline ignores history.</p>`
       : `<div class="bars">${barRows(top.map((p) => ({
-        labelHtml: `${pk(p)}`, value: probs[p], ref: base, ci: n ? C.wilson(cnt[p], n) : null,
-        tip: `${C.label(p)}: estimate ${pct(probs[p], 2)} vs ${pct(base, 2)} baseline. Seen ${cnt[p]} of ${n}; 95% range for its observed rate ${pct(C.wilson(cnt[p], n)[0], 1)}–${pct(C.wilson(cnt[p], n)[1], 1)}.`,
+        labelHtml: `${pk(p)}`, value: probs[p], ref: base, ci: n ? ci(p) : null,
+        tip: `${C.label(p)}: estimate ${pct(probs[p], 2)} vs ${pct(base, 2)} baseline. Seen ${cnt[p]} of ${n}; 95% range for its ${wcs ? 'weighted ' : ''}rate ${pct(ci(p)[0], 1)}–${pct(ci(p)[1], 1)}.`,
       })), domain, { alt: true, d: 2 })}</div>
       <p class="small muted" style="margin:0">Bar = estimate, whisker = 95% range of the observed rate, grey tick = baseline ${pct(base, 2)}. Overlapping whiskers and tick mean the data can't tell this pocket from any other.</p>`;
 
     const allTable = `<details><summary>All ${w.size} pockets</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pocket</th><th class="r">Estimate</th><th class="r">vs base</th><th class="r">Seen</th><th class="r">95% range</th></tr></thead><tbody>
-      ${order.map((p) => { const ci = C.wilson(cnt[p], n); return `<tr><td>${pk(p)}</td><td class="r">${pct(probs[p], 2)}</td><td class="r">${(probs[p] - base >= 0 ? '+' : '') + ((probs[p] - base) * 100).toFixed(2)}</td><td class="r">${cnt[p]}</td><td class="r">${n ? `${pct(ci[0])}–${pct(ci[1])}` : '–'}</td></tr>`; }).join('')}
+      ${order.map((p) => { const r = ci(p); return `<tr><td>${pk(p)}</td><td class="r">${pct(probs[p], 2)}</td><td class="r">${(probs[p] - base >= 0 ? '+' : '') + ((probs[p] - base) * 100).toFixed(2)}</td><td class="r">${cnt[p]}</td><td class="r">${n ? `${pct(r[0])}–${pct(r[1])}` : '–'}</td></tr>`; }).join('')}
       </tbody></table></div></details>`;
 
     const cp = C.categoryProbs(probs, w);
@@ -655,7 +666,7 @@
       ${cp.flatMap((g) => g.items.map((i) => `<tr><td>${esc(i.label)}</td><td class="r">${pct(i.p)}</td><td class="r">${pct(i.base)}</td><td class="r">${(i.p - i.base >= 0 ? '+' : '') + ((i.p - i.base) * 100).toFixed(1)}</td></tr>`)).join('')}
       </tbody></table></div>`;
 
-    const bt = C.backtest(all.map((s) => s.pocket), w, win, { alpha });
+    const bt = C.backtest(all.map((s) => s.pocket), w, win, params);
     let btHtml;
     if (bt.scored < 30) {
       btHtml = `<div class="verdict na"><span class="ico">i</span><div>A backtest needs at least 50 spins (20 to start from, 30 to score). This dealer has ${all.length}.</div></div>`;
@@ -689,7 +700,7 @@
       <div class="list">${evals.slice(0, 25).map(({ p, e }) => {
         const best = p.pick ?? p.probs.indexOf(Math.max(...p.probs));
         const hit = (h) => (h ? '<span class="badge good">Hit</span>' : '<span class="badge">Miss</span>');
-        return `<div class="item"><div class="grow"><div class="small"><b>${esc(C.MODELS.find((m) => m.id === p.model)?.name || p.model)}</b> v${esc(p.modelVersion)} · ${p.window === 'all' ? 'all' : `last ${p.window}`} · n=${p.n}${p.params?.alpha != null && p.model === 'smoothed' ? ` · α=${p.params.alpha}` : ''}</div>
+        return `<div class="item"><div class="grow"><div class="small"><b>${esc(C.MODELS.find((m) => m.id === p.model)?.name || p.model)}</b> v${esc(p.modelVersion)} · ${p.window === 'all' ? 'all' : `last ${p.window}`} · n=${p.n}${esc(paramText(p.model, p.params || {}))}</div>
           <div class="meta">${esc(fmtDT(p.createdAt))} · pick ${C.label(best)} at ${pct(p.probs[best], 2)}${p.sector ? ` · sector ${p.sector.map(C.label).join(' ')}` : ''}</div>
           ${e && p.pick != null ? `<div class="row" style="gap:6px;margin-top:3px"><span class="small">Pick</span>${hit(e.pickHit)}${p.stake ? `<span class="small num">${money(e.pickHit ? 35 * p.stake : -p.stake)}</span>` : ''}<span class="small">Multi</span>${hit(e.sectorHit)}${p.stake ? `<span class="small num">${money((e.sectorHit ? 36 * p.stake : 0) - p.sector.length * p.stake)}</span>` : ''}</div>` : ''}
           <div class="meta">${e ? `Next spin ${pk(e.pocket)} got ${pct(e.p, 2)} (rank ${e.rank}) · log loss <span class="num">${fix(e.logLoss, 2)}</span> vs <span class="num">${fix(e.baseLogLoss, 2)}</span>` : 'Waiting for the next spin'}</div></div></div>`;
@@ -700,15 +711,18 @@
         <div class="chips" role="group" aria-label="Model">${C.MODELS.map((m) => `<button class="chip" data-act="model" data-v="${m.id}" aria-pressed="${model === m.id}">${esc(m.name)}</button>`).join('')}</div>
         <p class="small muted" style="margin:0">${esc(modelInfo.desc)}</p>
         ${windowChips('pwin', win)}
-        ${model === 'smoothed' ? `<label class="f"><span>Smoothing strength α = <b id="alpha-v" class="num">${alpha}</b> pseudo-spins per pocket</span><input id="alpha" type="range" min="1" max="50" step="1" value="${alpha}"></label>` : ''}
+        ${model === 'weighted' ? `<div class="stack" style="gap:6px"><span class="eyebrow">Weight on recent spins · half-life</span>
+          <div class="chips" role="group" aria-label="Half-life">${HALF_LIVES.map((h) => `<button class="chip" data-act="halflife" data-v="${h}" aria-pressed="${params.halfLife === h}">${h} spins</button>`).join('')}</div>
+          <p class="small muted" style="margin:0">Weight of a spin by age: latest <b class="num">1.0</b> · ${params.halfLife} ago <b class="num">0.5</b> · ${2 * params.halfLife} ago <b class="num">0.25</b> · ${4 * params.halfLife} ago <b class="num">0.06</b>. Shorter half-life reacts faster but is noisier.</p></div>` : ''}
+        ${model === 'smoothed' || model === 'weighted' ? `<label class="f"><span>Smoothing strength α = <b id="alpha-v" class="num">${alpha}</b> pseudo-spins per pocket</span><input id="alpha" type="range" min="1" max="50" step="1" value="${alpha}"></label>` : ''}
       </section>
       ${renderPick(d, w, probs, pockets, win, all)}
       <section class="card stack"><h2>Next-spin estimate</h2>${n || model === 'baseline' ? pocketBars + (model !== 'baseline' ? allTable : '') : '<p class="small muted">No spins in this window yet. The estimate equals the baseline until spins are recorded.</p>'}</section>
       <section class="card stack"><h2>Outside bets</h2>${catHtml}</section>
       <section class="card stack"><h2>How this was made</h2>
         <div class="tbl-wrap"><table class="tbl"><tbody>
-          <tr><td>Model</td><td>${esc(modelInfo.name)} v${C.MODEL_VERSION[model]}${model === 'smoothed' ? ` · α = ${alpha}` : ''}</td></tr>
-          <tr><td>Data</td><td>${win === 'all' ? 'All' : `Last ${win}`} spins of this dealer only · n = ${n}</td></tr>
+          <tr><td>Model</td><td>${esc(modelInfo.name)} v${C.MODEL_VERSION[model]}${esc(paramText(model, params))}</td></tr>
+          <tr><td>Data</td><td>${win === 'all' ? 'All' : `Last ${win}`} spins of this dealer only · n = ${n}${wcs ? ` · effective n ≈ ${Math.round(wcs.nEff)} after weighting` : ''}</td></tr>
           <tr><td>Period</td><td>${n ? `${esc(fmtDT(sp[0].t))} → ${esc(fmtDT(sp[n - 1].t))}` : '–'}</td></tr>
           <tr><td>Wheel</td><td>${esc(w.name)} · baseline ${pct(base, 2)}</td></tr>
           <tr><td>Generated</td><td>${esc(fmtDT(Date.now()))}</td></tr>
@@ -1003,12 +1017,14 @@
     swin: (el) => { const v = el.dataset.v; prefs.swin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
     pwin: (el) => { const v = el.dataset.v; prefs.pwin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
     sector: (el) => { prefs.sector = el.dataset.v; savePrefs(); render(); },
+    halflife: (el) => { prefs.halfLife = Number(el.dataset.v); savePrefs(); render(); },
     model: (el) => { prefs.model = el.dataset.v; savePrefs(); render(); },
     'save-pred': () => {
       const d = S.dealers[V.dealerId], w = wheelOf(d);
       const win = prefs.pwin[d.id] ?? 100;
       const all = spinsOf(d.id), sp = C.windowed(all, win);
-      const params = prefs.model === 'smoothed' ? { alpha: prefs.alpha } : {};
+      const mp = modelParams();
+      const params = prefs.model === 'weighted' ? mp : prefs.model === 'smoothed' ? { alpha: mp.alpha } : {};
       const p = {
         id: newId('p'), casinoId: d.casinoId, dealerId: d.id, createdAt: Date.now(),
         cutoff: all.length ? all[all.length - 1].t : 0, window: win, model: prefs.model, modelVersion: C.MODEL_VERSION[prefs.model], params,

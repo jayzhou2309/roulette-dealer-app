@@ -70,6 +70,7 @@ Models:
 * **Baseline v1:** `1/N`.
 * **Frequency v1:** `c_i / n` with a floor of `1e-6` for scoring (log loss is otherwise infinite).
 * **Smoothed v1:** `(c_i + α) / (n + αN)`, α default 5 (pseudo-spins per pocket).
+* **Recency-weighted v1 (default):** weighted counts `w_i = Σ 0.5^(age/H)` over the window (latest spin age 0), `p_i = (w_i + α) / (Σw + αN)`. H default 50. Uncertainty uses effective n = (Σw)² / Σw². Walk-forward replays use an incremental decay tracker (multiply by 0.5^(1/H) each spin, subtract 0.5^(W/H) for the spin leaving the window).
 
 Backtest starts after 20 spins of history so the first predictions are not degenerate; uses the same window rule as the live view (last W spins before the scored spin).
 
