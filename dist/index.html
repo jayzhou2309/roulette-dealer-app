@@ -1,0 +1,1819 @@
+<title>Roulette Dealer Analytics</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#151f1c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-column phone app — sticky top bar, scrolling sheet of cards, bottom tab bar inside a dealer. */
+:root {
+  --bg: #eef1ef;
+  --surface: #fbfcfb;
+  --surface-2: #e4e9e6;
+  --line: #cfd8d3;
+  --fg: #14211c;
+  --muted: #56655e;
+  --accent: #8a6420;        /* brass rail */
+  --accent-ink: #fffaf0;
+  --pocket-red: #b8282b;
+  --pocket-black: #1d2224;
+  --pocket-green: #0f7a4a;
+  --above: #b07a1a;         /* more than expected */
+  --below: #3f6f9a;         /* fewer than expected */
+  --mid: #c9d0cc;
+  --good: #1f7a4d;
+  --warn: #9a5b00;
+  --bad: #a3262a;
+  --shadow: 0 1px 2px rgb(20 33 28 / .08), 0 4px 16px rgb(20 33 28 / .06);
+  --f-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1412; --surface: #151f1c; --surface-2: #1d2925; --line: #2b3934; --fg: #e4ece8; --muted: #93a39b;
+    --accent: #d2ad62; --accent-ink: #1a1405; --pocket-red: #d23b3e; --pocket-black: #0a0c0d; --pocket-green: #189160;
+    --above: #d9a443; --below: #6c9fcc; --mid: #34433e; --good: #4fbf86; --warn: #e0a24a; --bad: #ef6b6e;
+    --shadow: 0 1px 2px rgb(0 0 0 / .4); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1412; --surface: #151f1c; --surface-2: #1d2925; --line: #2b3934; --fg: #e4ece8; --muted: #93a39b;
+  --accent: #d2ad62; --accent-ink: #1a1405; --pocket-red: #d23b3e; --pocket-black: #0a0c0d; --pocket-green: #189160;
+  --above: #d9a443; --below: #6c9fcc; --mid: #34433e; --good: #4fbf86; --warn: #e0a24a; --bad: #ef6b6e;
+  --shadow: 0 1px 2px rgb(0 0 0 / .4); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 var(--f-body); -webkit-tap-highlight-color: transparent; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num, .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* top bar */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+.top-in { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 6px; min-height: 56px; }
+.top h1 { font: 600 22px/1.1 var(--f-display); letter-spacing: .01em; margin: 0; text-wrap: balance; }
+.top .sub { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top .titles { flex: 1; min-width: 0; padding: 6px 4px; }
+.icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; display: grid; place-items: center; flex: none; }
+.icon-btn:hover { background: var(--surface-2); }
+.icon-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.save-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; margin-right: 6px; }
+.save-dot.busy { background: var(--warn); }
+.save-dot.err { background: var(--bad); }
+.save-dot.local { background: var(--muted); }
+
+main { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px 110px; display: grid; gap: 14px; }
+
+/* cards & type */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; min-width: 0; }
+.card h2 { font: 600 19px/1.15 var(--f-display); letter-spacing: .02em; margin: 0 0 4px; text-wrap: balance; }
+.card h3 { font: 600 13px/1.2 var(--f-body); margin: 0; }
+.eyebrow { font: 600 11px/1 var(--f-body); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.stack { display: grid; gap: 10px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notice { border-radius: var(--r); padding: 10px 12px; font-size: 13.5px; background: var(--surface-2); border: 1px solid var(--line); }
+.notice.caution { border-left: 3px solid var(--warn); }
+.notice strong { display: block; margin-bottom: 2px; }
+.badge { font: 600 11px/1 var(--f-body); letter-spacing: .05em; text-transform: uppercase; padding: 4px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.badge.sample { color: var(--accent); }
+.badge.good { color: var(--good); }
+.badge.bad { color: var(--bad); }
+
+/* buttons */
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 14px; min-height: 42px; font-weight: 500; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.danger { color: var(--bad); }
+.btn.block { width: 100%; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; min-height: 34px; font-size: 13.5px; }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+/* lists */
+.list { display: grid; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--line); text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; }
+.item:first-child { border-top: 0; }
+.item .grow { flex: 1; min-width: 0; }
+.item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .meta { color: var(--muted); font-size: 12.5px; }
+.item .chev { color: var(--muted); }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.tile b { display: block; font: 600 24px/1.1 var(--f-display); }
+.tile span { font-size: 12px; color: var(--muted); }
+
+/* pockets */
+.pk { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 5px; border-radius: 6px; color: #fff;
+  font: 600 17px/1 var(--f-display); font-variant-numeric: tabular-nums; flex: none; }
+.pk.red { background: var(--pocket-red); }
+.pk.black { background: var(--pocket-black); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .12); }
+.pk.green { background: var(--pocket-green); }
+.pk.lg { min-width: 40px; height: 40px; font-size: 22px; }
+.strip { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.strip .pk:first-child { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* keypad */
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.keypad .zeros { grid-column: 1 / -1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 5px; }
+.key { border: 0; border-radius: 8px; height: 50px; color: #fff; font: 600 26px/1 var(--f-display); transition: transform .06s; touch-action: manipulation; }
+.key:active { transform: scale(.96); }
+.key.red { background: var(--pocket-red); }
+.key.black { background: var(--pocket-black); }
+.key.green { background: var(--pocket-green); }
+.key.flash { box-shadow: 0 0 0 3px var(--accent); }
+@media (prefers-reduced-motion: reduce) { .key { transition: none; } }
+
+/* forms */
+label.f { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label.f > span { font-weight: 500; }
+.in { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 9px 10px; min-height: 42px; color: var(--fg); font-size: 16px; }
+textarea.in { min-height: 90px; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 420px) { .grid2 { grid-template-columns: 1fr; } }
+
+/* bars */
+.bars { display: grid; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 88px 1fr 112px; align-items: center; gap: 8px; font-size: 13px; }
+.bar-row .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .val { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+.bar-row .val b { color: var(--fg); font-weight: 600; }
+.track { position: relative; height: 14px; background: var(--surface-2); border-radius: 3px; }
+.fill { position: absolute; left: 0; top: 2px; bottom: 2px; background: var(--fg); border-radius: 0 3px 3px 0; opacity: .85; }
+.fill.alt { background: var(--accent); opacity: 1; }
+.ci { position: absolute; top: 6px; height: 2px; background: var(--muted); }
+.tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--accent); }
+.tick.base { background: var(--muted); }
+
+/* heat grid */
+.heat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.heat .zeros { grid-column: 1 / -1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
+.cell { border: 0; border-radius: 6px; padding: 6px 8px; display: flex; justify-content: space-between; align-items: baseline; min-height: 38px; color: var(--fg); position: relative; }
+.cell .n { font: 600 18px/1 var(--f-display); }
+.cell .c { font: 12px/1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.cell .dot { position: absolute; left: 3px; top: 3px; width: 6px; height: 6px; border-radius: 50%; }
+.legend-ramp { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--below), var(--mid), var(--above)); }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding: 6px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl td { padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl td.r, .tbl th.r { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.tbl tr:last-child td { border-bottom: 0; }
+
+/* tabs */
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line);
+  padding-left: max(0px, env(safe-area-inset-left, 0px)); padding-right: max(0px, env(safe-area-inset-right, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.tabs-in { max-width: 720px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); }
+.tab { border: 0; background: none; padding: 8px 4px 10px; display: grid; justify-items: center; gap: 3px; font-size: 12px; color: var(--muted); }
+.tab svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab[aria-current="page"] { color: var(--fg); font-weight: 600; }
+.tab[aria-current="page"] svg { stroke: var(--accent); }
+
+/* sheet */
+.scrim { position: fixed; inset: 0; background: rgb(8 14 12 / .45); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--surface); width: 100%; max-width: 560px; max-height: 92%; overflow-y: auto; border-radius: 16px 16px 0 0;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 12px; }
+.sheet h2 { font: 600 22px/1.1 var(--f-display); margin: 0; }
+@media (min-width: 640px) { .scrim { align-items: center; } .sheet { border-radius: 16px; } }
+
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom, 0px)); z-index: 30; background: var(--fg); color: var(--bg);
+  border-radius: 10px; padding: 8px 8px 8px 14px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow); max-width: calc(100% - 32px); font-size: 14px; }
+.toast button { background: none; border: 0; color: var(--accent); font-weight: 700; padding: 6px 8px; }
+:root:not([data-theme="light"]) .toast button { color: var(--accent); }
+
+.empty { text-align: center; padding: 28px 12px; display: grid; gap: 10px; justify-items: center; }
+.empty h2 { font: 600 26px/1.1 var(--f-display); margin: 0; }
+.wheel-art { width: 96px; height: 96px; }
+.verdict { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+.verdict .ico { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: var(--surface); }
+.verdict.ok .ico { background: var(--good); }
+.verdict.flag .ico { background: var(--warn); }
+.verdict.na .ico { background: var(--muted); }
+details summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 4px 0; }
+.meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--accent); }
+.tip { position: fixed; z-index: 40; background: var(--fg); color: var(--bg); font-size: 12.5px; padding: 6px 9px; border-radius: 6px; pointer-events: none; max-width: 220px; }
+
+/* suggested bet */
+.pick-card { border-color: var(--accent); }
+.pick-hero { display: flex; align-items: center; gap: 14px; }
+.pk.xl { min-width: 72px; height: 72px; font-size: 44px; border-radius: 12px; box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--accent); }
+.pk.is-pick { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.sector-row { gap: 6px; }
+.wheel-big { width: 100%; max-width: 320px; height: auto; margin: 0 auto; display: block; }
+.tmini { display: grid; grid-template-columns: 30px repeat(12, minmax(22px, 1fr)); grid-template-rows: repeat(6, 15px); gap: 2px; min-width: 330px; }
+.tm { display: grid; place-items: center; border-radius: 3px; color: #fff; font: 600 13px/1 var(--f-display); opacity: .2; }
+.tm.red { background: var(--pocket-red); }
+.tm.black { background: var(--pocket-black); }
+.tm.green { background: var(--pocket-green); }
+.tm.on { opacity: 1; }
+.tm.pick { opacity: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+
+.tbl.money td:first-child { color: var(--muted); }
+.tbl.money tbody tr:nth-child(3) td, .tbl.money tbody tr:nth-child(7) td { border-top: 1px solid var(--line); }
+
+/* hot & cold */
+.hc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hc-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2); min-width: 0; }
+.hc-item.hc-flag { box-shadow: inset 0 0 0 2px var(--accent); }
+.hc-item .badge { margin-left: auto; }
+.eyebrow.hc-hot { color: var(--above); }
+.eyebrow.hc-cold { color: var(--below); }
+.hc-line { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; width: 100%; border: 0; background: none; padding: 4px 0 0; text-align: left; }
+.hc-line .eyebrow { margin: 0 2px 0 4px; }
+.hc-line .eyebrow:first-child { margin-left: 0; }
+.hc-line .small { margin-left: auto; }
+@media (max-width: 360px) { .hc-grid { grid-template-columns: 1fr; } }
+
+</style>
+<header class="top" id="top"></header>
+<main id="main" aria-live="polite"></main>
+<nav class="tabs" id="tabs" aria-label="Dealer sections" hidden></nav>
+<script>
+// Pure roulette statistics. No DOM access; loaded in the page and in Node tests.
+const Core = (() => {
+  const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+  const DOUBLE_ZERO = 37;
+  const EPS = 1e-6; // probability floor so log loss stays finite
+  const MODEL_VERSION = { baseline: '1.0', frequency: '1.0', smoothed: '1.0' };
+  const MODELS = [
+    { id: 'baseline', name: 'Baseline', desc: 'Theoretical fair-wheel probability for every pocket.' },
+    { id: 'frequency', name: 'Historical frequency', desc: 'Share of past spins that landed on each pocket.' },
+    { id: 'smoothed', name: 'Smoothed frequency', desc: 'Past counts plus α pseudo-spins per pocket, pulling small samples toward the baseline.' },
+  ];
+
+  function wheel(type) {
+    const size = type === 'US' ? 38 : 37;
+    const pockets = Array.from({ length: size }, (_, i) => i);
+    return { type: type === 'US' ? 'US' : 'EU', size, pockets, name: type === 'US' ? 'American (0, 00)' : 'European (single 0)' };
+  }
+
+  function label(p) { return p === DOUBLE_ZERO ? '00' : String(p); }
+
+  function parsePocket(token, w) {
+    const s = String(token).trim();
+    if (s === '00') return w.size === 38 ? DOUBLE_ZERO : null;
+    if (!/^\d{1,2}$/.test(s)) return null;
+    const n = Number(s);
+    return n >= 0 && n <= 36 ? n : null;
+  }
+
+  function colorOf(p) {
+    if (p === 0 || p === DOUBLE_ZERO) return 'green';
+    return RED.has(p) ? 'red' : 'black';
+  }
+
+  const isZero = (p) => p === 0 || p === DOUBLE_ZERO;
+
+  const GROUPS = [
+    { key: 'color', label: 'Colour', items: [
+      { k: 'red', label: 'Red', test: (p) => colorOf(p) === 'red' },
+      { k: 'black', label: 'Black', test: (p) => colorOf(p) === 'black' },
+      { k: 'green', label: 'Green (zero)', test: isZero },
+    ] },
+    { key: 'parity', label: 'Odd / even', items: [
+      { k: 'odd', label: 'Odd', test: (p) => !isZero(p) && p % 2 === 1 },
+      { k: 'even', label: 'Even', test: (p) => !isZero(p) && p % 2 === 0 },
+    ] },
+    { key: 'range', label: 'Low / high', items: [
+      { k: 'low', label: '1–18', test: (p) => !isZero(p) && p <= 18 },
+      { k: 'high', label: '19–36', test: (p) => !isZero(p) && p >= 19 },
+    ] },
+    { key: 'dozen', label: 'Dozens', items: [
+      { k: 'd1', label: '1st 12', test: (p) => !isZero(p) && p <= 12 },
+      { k: 'd2', label: '2nd 12', test: (p) => p >= 13 && p <= 24 },
+      { k: 'd3', label: '3rd 12', test: (p) => p >= 25 && p <= 36 },
+    ] },
+    { key: 'column', label: 'Columns', items: [
+      { k: 'c1', label: 'Column 1', test: (p) => !isZero(p) && p % 3 === 1 },
+      { k: 'c2', label: 'Column 2', test: (p) => !isZero(p) && p % 3 === 2 },
+      { k: 'c3', label: 'Column 3', test: (p) => !isZero(p) && p % 3 === 0 },
+    ] },
+  ];
+
+  // Chronological, non-deleted spins for one dealer.
+  function activeSpins(spins) {
+    return spins.filter((s) => !s.del).slice().sort((a, b) => a.t - b.t || a.rt - b.rt);
+  }
+
+  function windowed(spins, win) {
+    return win && win !== 'all' && spins.length > win ? spins.slice(spins.length - win) : spins;
+  }
+
+  function counts(pockets, size) {
+    const c = new Array(size).fill(0);
+    for (const p of pockets) if (p >= 0 && p < size) c[p]++;
+    return c;
+  }
+
+  // Observed vs theoretical share for every outside-bet group.
+  function categoryStats(pockets, w) {
+    const n = pockets.length;
+    return GROUPS.map((g) => ({
+      key: g.key,
+      label: g.label,
+      items: g.items.map((it) => {
+        const k = pockets.reduce((a, p) => a + (it.test(p) ? 1 : 0), 0);
+        const expected = w.pockets.filter(it.test).length / w.size;
+        return { k: it.k, label: it.label, count: k, observed: n ? k / n : 0, expected, ci: wilson(k, n) };
+      }),
+    }));
+  }
+
+  // Probability of each category under a pocket distribution.
+  function categoryProbs(probs, w) {
+    return GROUPS.map((g) => ({
+      key: g.key,
+      label: g.label,
+      items: g.items.map((it) => ({
+        k: it.k,
+        label: it.label,
+        p: w.pockets.reduce((a, p) => a + (it.test(p) ? probs[p] : 0), 0),
+        base: w.pockets.filter(it.test).length / w.size,
+      })),
+    }));
+  }
+
+  function runInfo(pockets, keyFn) {
+    let cur = null, curLen = 0, best = null, bestLen = 0;
+    for (const p of pockets) {
+      const k = keyFn(p);
+      if (k !== null && k === cur) curLen++;
+      else { cur = k; curLen = k === null ? 0 : 1; }
+      if (cur !== null && curLen > bestLen) { best = cur; bestLen = curLen; }
+    }
+    return { current: cur, currentLen: curLen, longest: best, longestLen: bestLen };
+  }
+
+  function streaks(pockets) {
+    return {
+      color: runInfo(pockets, (p) => (isZero(p) ? null : colorOf(p))),
+      parity: runInfo(pockets, (p) => (isZero(p) ? null : p % 2 ? 'odd' : 'even')),
+      range: runInfo(pockets, (p) => (isZero(p) ? null : p <= 18 ? 'low' : 'high')),
+      dozen: runInfo(pockets, (p) => (isZero(p) ? null : p <= 12 ? '1st 12' : p <= 24 ? '2nd 12' : '3rd 12')),
+      repeats: pockets.reduce((a, p, i) => a + (i && pockets[i - 1] === p ? 1 : 0), 0),
+    };
+  }
+
+  // Spins since each pocket last appeared (null = never in this sample).
+  function gaps(pockets, w) {
+    const g = new Array(w.size).fill(null);
+    for (let i = pockets.length - 1, seen = 0; i >= 0 && seen < w.size; i--) {
+      const p = pockets[i];
+      if (g[p] === null) { g[p] = pockets.length - 1 - i; seen++; }
+    }
+    return g;
+  }
+
+  // ---- distributions ----
+  function lgamma(x) {
+    const c = [76.18009172947146, -86.50532032941677, 24.01409824083091,
+      -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+    let y = x, tmp = x + 5.5;
+    tmp -= (x + 0.5) * Math.log(tmp);
+    let ser = 1.000000000190015;
+    for (const ci of c) ser += ci / ++y;
+    return -tmp + Math.log((2.5066282746310005 * ser) / x);
+  }
+
+  // Regularised upper incomplete gamma Q(a, x).
+  function gammaQ(a, x) {
+    if (x <= 0) return 1;
+    if (x < a + 1) {
+      let sum = 1 / a, del = sum, ap = a;
+      for (let n = 0; n < 500; n++) {
+        ap++; del *= x / ap; sum += del;
+        if (Math.abs(del) < Math.abs(sum) * 1e-14) break;
+      }
+      return 1 - sum * Math.exp(-x + a * Math.log(x) - lgamma(a));
+    }
+    let b = x + 1 - a, c = 1 / 1e-300, d = 1 / b, h = d;
+    for (let i = 1; i < 500; i++) {
+      const an = -i * (i - a);
+      b += 2;
+      d = an * d + b; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = b + an / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d;
+      const del = d * c; h *= del;
+      if (Math.abs(del - 1) < 1e-14) break;
+    }
+    return Math.exp(-x + a * Math.log(x) - lgamma(a)) * h;
+  }
+
+  // Goodness of fit against a uniform (fair) wheel.
+  function chiSquare(c) {
+    const n = c.reduce((a, b) => a + b, 0);
+    const k = c.length;
+    if (!n) return { stat: 0, df: k - 1, p: 1, n, expected: 0, valid: false };
+    const e = n / k;
+    const stat = c.reduce((a, o) => a + ((o - e) ** 2) / e, 0);
+    return { stat, df: k - 1, p: gammaQ((k - 1) / 2, stat / 2), n, expected: e, valid: e >= 5 };
+  }
+
+  function wilson(k, n, z = 1.96) {
+    if (!n) return [0, 1];
+    const p = k / n, z2 = z * z, d = 1 + z2 / n;
+    const centre = (p + z2 / (2 * n)) / d;
+    const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / d;
+    return [Math.max(0, centre - half), Math.min(1, centre + half)];
+  }
+
+  // ---- models ----
+  function predict(model, pockets, w, params = {}) {
+    const N = w.size;
+    if (model === 'baseline' || !pockets.length) return new Array(N).fill(1 / N);
+    const c = counts(pockets, N), n = pockets.length;
+    if (model === 'frequency') return c.map((x) => x / n);
+    const a = params.alpha ?? 5;
+    return c.map((x) => (x + a) / (n + a * N));
+  }
+
+  const logLoss = (p) => -Math.log(Math.max(p, EPS));
+  const brier = (probs, actual) => probs.reduce((a, p, i) => a + (p - (i === actual ? 1 : 0)) ** 2, 0);
+
+  // Walk-forward: spin i is scored using only the `win` spins before it.
+  function backtest(pockets, w, win, params = {}, minHistory = 20) {
+    const N = w.size, a = params.alpha ?? 5;
+    const W = win === 'all' || !win ? Infinity : win;
+    const c = new Array(N).fill(0);
+    let n = 0, sumSq = 0, lo = 0;
+    const res = { baseline: [], frequency: [], smoothed: [] };
+    const br = { baseline: [], frequency: [], smoothed: [] };
+    const add = (p, d) => { sumSq += 2 * d * c[p] + 1; c[p] += d; n += d; };
+    for (let i = 0; i < pockets.length; i++) {
+      if (i >= minHistory) {
+        const y = pockets[i];
+        res.baseline.push(logLoss(1 / N));
+        br.baseline.push(1 - 1 / N);
+        const pf = c[y] / n;
+        res.frequency.push(logLoss(pf));
+        br.frequency.push(sumSq / (n * n) - 2 * pf + 1);
+        const D = n + a * N, ps = (c[y] + a) / D;
+        res.smoothed.push(logLoss(ps));
+        br.smoothed.push((sumSq + 2 * a * n + N * a * a) / (D * D) - 2 * ps + 1);
+      }
+      add(pockets[i], 1);
+      if (n > W) add(pockets[lo++], -1);
+    }
+    const m = res.baseline.length;
+    const out = { scored: m, window: win, minHistory, models: {} };
+    for (const id of Object.keys(res)) {
+      const ll = res[id], diffs = ll.map((x, i) => x - res.baseline[i]);
+      const md = mean(diffs), se = m > 1 ? Math.sqrt(variance(diffs) / m) : NaN;
+      out.models[id] = {
+        logLoss: mean(ll), brier: mean(br[id]), diff: md, se,
+        beats: id !== 'baseline' && m >= 30 && md + 2 * se < 0,
+        worse: id !== 'baseline' && m >= 30 && md - 2 * se > 0,
+      };
+    }
+    return out;
+  }
+
+  function mean(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN; }
+  function variance(a) {
+    const m = mean(a);
+    return a.length > 1 ? a.reduce((x, y) => x + (y - m) ** 2, 0) / (a.length - 1) : 0;
+  }
+
+  // Outcome = first spin after the cutoff that was recorded after the prediction was made.
+  function evaluate(pred, spins) {
+    const next = activeSpins(spins).find((s) => s.t > pred.cutoff && s.rt > pred.createdAt);
+    if (!next) return null;
+    const N = pred.probs.length, y = next.pocket;
+    return {
+      spinId: next.id, pocket: y, t: next.t,
+      p: pred.probs[y], logLoss: logLoss(pred.probs[y]), brier: brier(pred.probs, y),
+      baseP: 1 / N, baseLogLoss: logLoss(1 / N), baseBrier: 1 - 1 / N,
+      rank: 1 + pred.probs.filter((q) => q > pred.probs[y]).length,
+      pickHit: pred.pick == null ? null : y === pred.pick,
+      sectorHit: pred.sector ? pred.sector.includes(y) : null,
+    };
+  }
+
+  // Physical pocket order around each wheel, clockwise from zero.
+  const WHEEL_ORDER = {
+    EU: [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26],
+    US: [0, 28, 9, 26, 30, 11, 7, 20, 32, 17, 5, 22, 34, 15, 3, 24, 36, 13, 1, 37, 27, 10, 25, 29, 12, 8, 19, 31, 18, 6, 21, 33, 16, 4, 23, 35, 14, 2],
+  };
+
+  // Highest-probability pocket; ties go to the most recently seen. null when every pocket is equal.
+  function pick(probs, pockets, w) {
+    const max = Math.max(...probs);
+    const tied = w.pockets.filter((p) => probs[p] >= max - 1e-12);
+    if (tied.length === w.size) return null;
+    const g = gaps(pockets, w);
+    tied.sort((a, b) => (g[a] ?? Infinity) - (g[b] ?? Infinity) || a - b);
+    return { pocket: tied[0], p: probs[tied[0]], tied: tied.length };
+  }
+
+  // A k-number bet built around the pick.
+  //   'neighbours': the pick plus (k-1)/2 pockets either side in wheel order
+  //   'arc':        the contiguous run of k pockets with the highest total probability
+  //   'top':        the k highest-probability pockets anywhere (ties to the most recently seen, via gapsArr)
+  function bestSector(probs, w, k, pickPocket, mode = 'arc', gapsArr = null) {
+    const order = WHEEL_ORDER[w.type], N = order.length;
+    if (mode === true || mode === 'neighbours') {
+      const i = order.indexOf(pickPocket), h = Math.floor(k / 2);
+      const ps = Array.from({ length: k }, (_, j) => order[(i - h + j + N) % N]);
+      return { pockets: ps, p: ps.reduce((a, p) => a + probs[p], 0), base: k / N, hasPick: true, contiguous: true };
+    }
+    if (mode === 'top') {
+      const g = gapsArr || new Array(N).fill(null);
+      const ps = w.pockets.slice().sort((a, b) => (a === pickPocket ? -1 : b === pickPocket ? 1 : 0)
+        || probs[b] - probs[a] || (g[a] ?? Infinity) - (g[b] ?? Infinity) || a - b).slice(0, k);
+      return { pockets: ps, p: ps.reduce((a, p) => a + probs[p], 0), base: k / N, hasPick: true, contiguous: false };
+    }
+    let best = null;
+    for (let s = 0; s < N; s++) {
+      const ps = Array.from({ length: k }, (_, j) => order[(s + j) % N]);
+      const sum = ps.reduce((a, p) => a + probs[p], 0);
+      const hasPick = ps.includes(pickPocket);
+      if (!best || sum > best.p + 1e-12 || (Math.abs(sum - best.p) <= 1e-12 && hasPick && !best.hasPick)) best = { pockets: ps, p: sum, hasPick };
+    }
+    return { pockets: best.pockets, p: best.p, base: k / N, hasPick: best.hasPick, contiguous: true };
+  }
+
+  // Straight-up bets: one chip of `stake` on each of k numbers, paid 35 to 1.
+  function betEconomics(k, stake, pHit) {
+    const cost = k * stake, back = 36 * stake;
+    return { cost, back, winProfit: back - cost, lossIfMiss: -cost, ev: pHit * back - cost };
+  }
+
+  // P(X >= h) for X ~ Binomial(m, p).
+  function binomUpper(h, m, p) {
+    if (h <= 0) return 1;
+    const lf = (x) => lgamma(x + 1);
+    let s = 0;
+    for (let x = h; x <= m; x++) s += Math.exp(lf(m) - lf(x) - lf(m - x) + x * Math.log(p) + (m - x) * Math.log(1 - p));
+    return Math.min(1, s);
+  }
+
+  // Walk-forward record of "bet the pick" and "bet the best k-sector". Frequency and smoothed
+  // models rank pockets identically, so one record covers both.
+  function pickBacktest(pockets, w, win, k, minHistory = 20, mode = 'arc') {
+    const N = w.size, order = WHEEL_ORDER[w.type];
+    const W = win === 'all' || !win ? Infinity : win;
+    const c = new Array(N).fill(0), last = new Array(N).fill(-1);
+    let lo = 0, n = 0, scored = 0, pickHits = 0, sectorHits = 0;
+    for (let i = 0; i < pockets.length; i++) {
+      if (i >= minHistory) {
+        const max = Math.max(...c);
+        if (c.some((x) => x !== max)) {
+          let pk = -1;
+          for (let p = 0; p < N; p++) if (c[p] === max && (pk < 0 || last[p] > last[pk])) pk = p;
+          const y = pockets[i];
+          scored++;
+          if (y === pk) pickHits++;
+          if (mode === true || mode === 'neighbours') {
+            const ip = order.indexOf(pk), h = Math.floor(k / 2);
+            if (Array.from({ length: k }, (_, j) => order[(ip - h + j + N) % N]).includes(y)) sectorHits++;
+          } else if (mode === 'top') {
+            const ranked = Array.from({ length: N }, (_, p) => p)
+              .sort((a, b) => (a === pk ? -1 : b === pk ? 1 : 0) || c[b] - c[a] || last[b] - last[a] || a - b);
+            if (ranked.slice(0, k).includes(y)) sectorHits++;
+          } else {
+          let sum = 0;
+          for (let j = 0; j < k; j++) sum += c[order[j]];
+          let bestS = 0, bestSum = sum, bestHas = order.slice(0, k).includes(pk);
+          for (let s = 1; s < N; s++) {
+            sum += c[order[(s + k - 1) % N]] - c[order[s - 1]];
+            const has = Array.from({ length: k }, (_, j) => order[(s + j) % N]).includes(pk);
+            if (sum > bestSum || (sum === bestSum && has && !bestHas)) { bestS = s; bestSum = sum; bestHas = has; }
+          }
+          if (Array.from({ length: k }, (_, j) => order[(bestS + j) % N]).includes(y)) sectorHits++;
+          }
+        }
+      }
+      c[pockets[i]]++; last[pockets[i]] = i; n++;
+      if (n > W) { c[pockets[lo++]]--; n--; }
+    }
+    return {
+      scored, k, pickHits, sectorHits,
+      pickRate: scored ? pickHits / scored : NaN, sectorRate: scored ? sectorHits / scored : NaN,
+      pickBase: 1 / N, sectorBase: k / N,
+      pickP: binomUpper(pickHits, scored, 1 / N), sectorP: binomUpper(sectorHits, scored, k / N),
+    };
+  }
+
+  // Hot = most hits in the window, cold = fewest (ties: hot → most recent, cold → longest absent).
+  // pAdj is the binomial tail probability multiplied by the number of pockets (Bonferroni),
+  // because looking at the extreme of 37 numbers always finds something that looks unusual.
+  function hotCold(pockets, w, k = 5) {
+    const n = pockets.length, N = w.size;
+    const c = counts(pockets, N), g = gaps(pockets, w), e = n / N;
+    const row = (p) => ({ pocket: p, count: c[p], expected: e, gap: g[p] });
+    const rec = (p) => g[p] ?? Infinity;
+    const hot = w.pockets.slice().sort((a, b) => c[b] - c[a] || rec(a) - rec(b) || a - b).slice(0, k)
+      .map((p) => ({ ...row(p), pAdj: Math.min(1, N * binomUpper(c[p], n, 1 / N)) }));
+    const cold = w.pockets.slice().sort((a, b) => c[a] - c[b] || rec(b) - rec(a) || a - b).slice(0, k)
+      .map((p) => ({ ...row(p), pAdj: Math.min(1, N * (1 - binomUpper(c[p] + 1, n, 1 / N))) }));
+    return { n, expected: e, hot, cold };
+  }
+
+  // Seeded generator for clearly-labelled simulated sample data.
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  return {
+    DOUBLE_ZERO, EPS, MODELS, MODEL_VERSION, GROUPS,
+    wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
+    categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
+    predict, logLoss, brier, backtest, evaluate, mean, rng,
+    WHEEL_ORDER, pick, bestSector, betEconomics, binomUpper, pickBacktest, hotCold,
+  };
+})();
+
+if (typeof module !== 'undefined') module.exports = Core;
+
+</script>
+<script>
+// Roulette Dealer Analytics — UI, store and persistence. Depends on Core (core.js).
+(() => {
+  const C = Core;
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const newId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const pct = (x, d = 1) => (Number.isFinite(x) ? `${(x * 100).toFixed(d)}%` : '–');
+  const fix = (x, d = 3) => (Number.isFinite(x) ? x.toFixed(d) : '–');
+  const fmtDT = (t) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const fmtClock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const fmtDay = (t) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const toLocalInput = (t) => { const d = new Date(t); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 19); };
+  const fromLocalInput = (s) => { const t = new Date(s).getTime(); return Number.isFinite(t) ? t : null; };
+  function ago(t) {
+    if (!t) return 'never';
+    const s = (Date.now() - t) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    if (s < 86400 * 30) return `${Math.round(s / 86400)} d ago`;
+    return fmtDay(t);
+  }
+  const pk = (p, cls = '') => `<span class="pk ${C.colorOf(p)} ${cls}">${C.label(p)}</span>`;
+  const LEDGER_SIZE = 800;
+  const WINDOWS = [50, 100, 250, 'all'];
+
+  const ICON = {
+    back: '<svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>',
+    more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>',
+    edit: '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    record: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 3v18M15 3v18M4 9h16M4 15h16"/></svg>',
+    history: '<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".8"/><circle cx="3.5" cy="12" r=".8"/><circle cx="3.5" cy="18" r=".8"/></svg>',
+    stats: '<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+    predict: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>',
+  };
+
+  // ---------- state ----------
+  const S = { casinos: {}, dealers: {}, ledgers: {}, preds: {} };
+  const spinCache = new Map();
+  let store = null;
+  let ready = false;
+  let V = { name: 'home' };
+  const prefs = loadPrefs();
+  const hist = { sort: 'desc', session: '', from: '', to: '', showDel: false, limit: 300 };
+  let customTime = null;
+  let lastTap = { p: null, at: 0 };
+
+  function loadPrefs() {
+    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'smoothed', alpha: 5, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10 };
+    try { return Object.assign(d, JSON.parse(localStorage.getItem('rda.prefs') || '{}')); } catch { return d; }
+  }
+  function savePrefs() { try { localStorage.setItem('rda.prefs', JSON.stringify({ ...prefs, view: V })); } catch { /* convenience only */ } }
+
+  const casinosList = () => Object.values(S.casinos).sort((a, b) => a.name.localeCompare(b.name));
+  const dealersOf = (cid) => Object.values(S.dealers).filter((d) => d.casinoId === cid).sort((a, b) => a.name.localeCompare(b.name));
+  const ledgersOf = (did) => Object.entries(S.ledgers).filter(([, l]) => l.dealerId === did).sort((a, b) => a[1].k - b[1].k);
+  const allSpinsOf = (did) => ledgersOf(did).flatMap(([, l]) => l.spins);
+  function spinsOf(did) {
+    if (!spinCache.has(did)) spinCache.set(did, C.activeSpins(allSpinsOf(did)));
+    return spinCache.get(did);
+  }
+  const predsOf = (did) => Object.values(S.preds).filter((p) => p.dealerId === did).sort((a, b) => b.createdAt - a.createdAt);
+  const wheelOf = (d) => C.wheel(d.wheel);
+  const lastActivity = (did) => { const s = spinsOf(did); return s.length ? Math.max(...s.slice(-50).map((x) => x.rt)) : 0; };
+
+  // ---------- persistence ----------
+  const saveState = { pending: 0, error: false };
+  function setSave(delta, err) {
+    saveState.pending += delta;
+    if (err) saveState.error = true;
+    if (delta < 0 && !err && saveState.pending === 0) saveState.error = false;
+    const dot = $('#save-dot');
+    if (!dot) return;
+    dot.className = 'save-dot' + (store?.kind === 'local' ? ' local' : saveState.error ? ' err' : saveState.pending ? ' busy' : '');
+    dot.title = store?.kind === 'local' ? 'Saved on this device only' : saveState.error ? 'Last save failed' : saveState.pending ? 'Saving…' : 'Saved to your account';
+  }
+
+  function CloudStore(db, uid) {
+    const ws = db.doc(`data/users/${uid}/ws`);
+    const queue = new Map();
+    const running = new Set();
+    async function drain(key) {
+      running.add(key);
+      while (queue.has(key)) {
+        const job = queue.get(key);
+        queue.delete(key);
+        const [col, id] = key.split('/');
+        const ref = ws.collection(col).doc(id);
+        setSave(1);
+        let ok = false;
+        for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+          try { job.op === 'set' ? await ref.set(job.doc) : await ref.delete(); ok = true; }
+          catch (e) {
+            if (e?.code === 'unavailable' && attempt === 0) { await new Promise((r) => setTimeout(r, 400 + Math.random() * 600)); continue; }
+            toast(e?.code === 'quota_exceeded' ? 'Storage is full. Export a backup and remove old dealers.' : 'Could not save the last change. It stays on screen; try again shortly.');
+            break;
+          }
+        }
+        setSave(-1, !ok);
+      }
+      running.delete(key);
+    }
+    const enqueue = (col, id, job) => { const key = `${col}/${id}`; queue.set(key, job); if (!running.has(key)) drain(key); };
+    return {
+      kind: 'cloud',
+      async load() {
+        const out = {};
+        await Promise.all(['casinos', 'dealers', 'ledgers', 'preds'].map(async (col) => {
+          const snap = await ws.collection(col).get();
+          out[col] = {};
+          for (const d of snap.docs) if (d.exists) out[col][d.id] = structuredClone(d.data());
+        }));
+        return out;
+      },
+      put: (col, id, doc) => enqueue(col, id, { op: 'set', doc: JSON.parse(JSON.stringify(doc)) }),
+      del: (col, id) => enqueue(col, id, { op: 'del' }),
+    };
+  }
+
+  function LocalStore() {
+    let timer = null;
+    const flush = () => {
+      try { localStorage.setItem('rda.data.v1', JSON.stringify(S)); setSave(0); }
+      catch { toast('This browser refused to save. Export a backup from the menu.'); setSave(0, true); }
+    };
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(flush, 250); };
+    return {
+      kind: 'local',
+      async load() { return readLocal(); },
+      put: schedule,
+      del: schedule,
+    };
+  }
+  function readLocal() { try { return JSON.parse(localStorage.getItem('rda.data.v1') || 'null'); } catch { return null; } }
+
+  // ---------- mutations ----------
+  function putCasino(c) { S.casinos[c.id] = c; store.put('casinos', c.id, c); }
+  function putDealer(d) { S.dealers[d.id] = d; store.put('dealers', d.id, d); }
+  function putLedger(id) { spinCache.delete(S.ledgers[id].dealerId); store.put('ledgers', id, S.ledgers[id]); }
+  function removeDealer(did) {
+    for (const [id] of ledgersOf(did)) { delete S.ledgers[id]; store.del('ledgers', id); }
+    for (const p of predsOf(did)) { delete S.preds[p.id]; store.del('preds', p.id); }
+    delete S.dealers[did]; store.del('dealers', did);
+    spinCache.delete(did);
+  }
+  function addSpins(d, list) {
+    const ls = ledgersOf(d.id);
+    let [id, led] = ls.length ? ls[ls.length - 1] : [null, null];
+    const touched = new Set();
+    for (const s of list) {
+      if (!led || led.spins.length >= LEDGER_SIZE) {
+        const k = led ? led.k + 1 : 0;
+        id = `${d.id}~${k}`;
+        led = S.ledgers[id] = { dealerId: d.id, casinoId: d.casinoId, k, spins: [] };
+      }
+      led.spins.push(s);
+      touched.add(id);
+    }
+    touched.forEach(putLedger);
+  }
+  function findSpin(did, sid) {
+    for (const [id, l] of ledgersOf(did)) { const i = l.spins.findIndex((s) => s.id === sid); if (i >= 0) return { id, l, i, s: l.spins[i] }; }
+    return null;
+  }
+  function makeSpin(d, pocket, t, session) {
+    return { id: newId('s'), casinoId: d.casinoId, dealerId: d.id, pocket, t, rt: Date.now(), session: session || '', notes: '', log: [] };
+  }
+
+  // ---------- routing ----------
+  function go(v) { V = v; window.scrollTo(0, 0); render(); savePrefs(); }
+  function validView(v) {
+    if (v.name === 'dealer') return S.dealers[v.dealerId] ? v : { name: 'home' };
+    if (v.name === 'casino') return S.casinos[v.casinoId] ? v : { name: 'home' };
+    return { name: 'home' };
+  }
+
+  // ---------- render ----------
+  function render() {
+    hideTip();
+    $('#top').innerHTML = renderTop();
+    setSave(0);
+    const main = $('#main');
+    const tabs = $('#tabs');
+    if (!ready) { main.innerHTML = `<div class="card empty">${wheelArt()}<p class="muted">Opening your records…</p></div>`; tabs.hidden = true; return; }
+    if (V.name === 'home') main.innerHTML = renderHome();
+    else if (V.name === 'casino') main.innerHTML = renderCasino();
+    else main.innerHTML = renderDealer();
+    tabs.hidden = V.name !== 'dealer';
+    if (V.name === 'dealer') tabs.innerHTML = renderTabs();
+  }
+
+  function renderTop() {
+    let back = '', title = 'Roulette Dealer Analytics', sub = 'Casinos · dealers · spin history · estimates', act = '';
+    if (V.name === 'home') {
+      act = `<button class="icon-btn" data-act="data" aria-label="Backup and data">${ICON.more}</button>`;
+    } else if (V.name === 'casino') {
+      const c = S.casinos[V.casinoId];
+      back = `<button class="icon-btn" data-act="home" aria-label="Back to casinos">${ICON.back}</button>`;
+      title = esc(c.name);
+      sub = [c.location, C.wheel(c.wheel).name, c.status === 'archived' ? 'Archived' : ''].filter(Boolean).map(esc).join(' · ');
+      act = `<button class="icon-btn" data-act="edit-casino" aria-label="Edit casino">${ICON.edit}</button>`;
+    } else if (V.name === 'dealer') {
+      const d = S.dealers[V.dealerId], c = S.casinos[d.casinoId];
+      back = `<button class="icon-btn" data-act="casino" data-id="${c.id}" aria-label="Back to ${esc(c.name)}">${ICON.back}</button>`;
+      title = esc(d.name);
+      sub = [c.name, d.table ? `Table ${d.table}` : '', d.wheel === 'US' ? 'American wheel' : 'European wheel', `${spinsOf(d.id).length} spins`].filter(Boolean).map(esc).join(' · ');
+      act = `<button class="icon-btn" data-act="edit-dealer" aria-label="Edit dealer">${ICON.edit}</button>`;
+    }
+    return `<div class="top-in">${back}<div class="titles"><h1>${title}</h1><div class="sub">${sub}</div></div><span id="save-dot" class="save-dot"></span>${act}</div>`;
+  }
+
+  function wheelArt() {
+    const order = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+    const R = 46, r = 30, step = (2 * Math.PI) / order.length;
+    const pt = (rad, a) => `${(50 + rad * Math.sin(a)).toFixed(2)} ${(50 - rad * Math.cos(a)).toFixed(2)}`;
+    const segs = order.map((p, i) => {
+      const a0 = i * step - step / 2, a1 = a0 + step;
+      const fill = { red: 'var(--pocket-red)', black: 'var(--pocket-black)', green: 'var(--pocket-green)' }[C.colorOf(p)];
+      return `<path d="M${pt(r, a0)} L${pt(R, a0)} A${R} ${R} 0 0 1 ${pt(R, a1)} L${pt(r, a1)} A${r} ${r} 0 0 0 ${pt(r, a0)}Z" fill="${fill}"/>`;
+    }).join('');
+    return `<svg class="wheel-art" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="49" fill="var(--accent)"/>${segs}<circle cx="50" cy="50" r="${r}" fill="var(--surface-2)"/><circle cx="50" cy="50" r="6" fill="var(--accent)"/></svg>`;
+  }
+
+  // Standalone install (home-screen app): no claude.ai viewer, records live on the phone by design.
+  const STANDALONE = !window.claude;
+
+  function storageNotice() {
+    return store?.kind === 'local' && !STANDALONE
+      ? `<div class="notice caution"><strong>Saved on this device only</strong>Your account store isn't available in this view, so records stay in this browser. Export a backup from the menu.</div>` : '';
+  }
+
+  function casinoTotals(c) {
+    const ds = dealersOf(c.id);
+    const spins = ds.reduce((a, d) => a + spinsOf(d.id).length, 0);
+    const last = Math.max(0, ...ds.map((d) => lastActivity(d.id)));
+    return { dealers: ds.length, active: ds.filter((d) => d.status !== 'archived').length, spins, last };
+  }
+
+  function renderHome() {
+    const cs = casinosList();
+    if (!cs.length) {
+      return `${storageNotice()}<section class="card empty">${wheelArt()}<h2>Start with a casino</h2>
+        <p class="muted small" style="max-width:34ch">Add a casino such as MBS or RWS, then its dealers. Each dealer keeps a separate spin history, statistics and estimates.</p>
+        <div class="row" style="justify-content:center"><button class="btn primary" data-act="new-casino">Add casino</button><button class="btn" data-act="sample">Load simulated sample</button></div></section>
+        ${aboutCard()}`;
+    }
+    const shown = cs.filter((c) => prefs.showArchived || c.status !== 'archived');
+    const archivedCount = cs.length - cs.filter((c) => c.status !== 'archived').length;
+    const recent = Object.values(S.dealers).map((d) => ({ d, t: lastActivity(d.id) })).filter((x) => x.t).sort((a, b) => b.t - a.t).slice(0, 5);
+    return `${storageNotice()}
+      <section class="card"><div class="spread"><h2>Casinos</h2><button class="btn primary" data-act="new-casino">Add casino</button></div>
+        <div class="list">${shown.map((c) => {
+          const t = casinoTotals(c);
+          return `<button class="item" data-act="casino" data-id="${c.id}"><div class="grow"><div class="name">${esc(c.name)}</div>
+            <div class="meta">${t.active} active dealer${t.active === 1 ? '' : 's'} · <span class="num">${t.spins.toLocaleString()}</span> spins · ${c.wheel === 'US' ? 'American' : 'European'} · last spin ${ago(t.last)}</div></div>
+            ${c.sample ? '<span class="badge sample">Sample</span>' : ''}${c.status === 'archived' ? '<span class="badge">Archived</span>' : ''}<span class="chev">›</span></button>`;
+        }).join('') || '<p class="muted small">All casinos are archived.</p>'}</div>
+        ${archivedCount ? `<button class="btn" data-act="toggle-archived" style="margin-top:8px">${prefs.showArchived ? 'Hide' : 'Show'} ${archivedCount} archived</button>` : ''}
+      </section>
+      ${recent.length ? `<section class="card"><h2>Recent dealers</h2><div class="list">${recent.map(({ d, t }) => {
+        const last = spinsOf(d.id).slice(-6).reverse();
+        return `<button class="item" data-act="dealer" data-id="${d.id}"><div class="grow"><div class="name">${esc(d.name)}</div><div class="meta">${esc(S.casinos[d.casinoId]?.name)} · ${ago(t)}</div></div><div class="row" style="gap:3px;flex-wrap:nowrap">${last.map((s) => pk(s.pocket)).join('')}</div></button>`;
+      }).join('')}</div></section>` : ''}
+      ${aboutCard()}`;
+  }
+
+  function aboutCard() {
+    return `<section class="card"><div class="eyebrow">About the estimates</div>
+      <p class="small" style="margin:6px 0 0">On a fair European wheel every pocket has a 1 in 37 chance (2.70%) on every spin, whatever happened before. This app records what each dealer's table produced and tests, on that dealer's own history, whether any model predicts better than that baseline. It does not promise winning numbers.</p></section>`;
+  }
+
+  function renderCasino() {
+    const c = S.casinos[V.casinoId];
+    const t = casinoTotals(c);
+    const meta = Object.entries(c.meta || {});
+    return `${c.status === 'archived' ? '<div class="notice">This casino is archived. Its dealers and history are kept and read-only actions still work.</div>' : ''}
+      <section class="card stack">
+        <div class="tiles"><div class="tile"><b class="num">${t.dealers}</b><span>dealers</span></div><div class="tile"><b class="num">${t.spins.toLocaleString()}</b><span>spins recorded</span></div><div class="tile"><b>${t.last ? esc(ago(t.last)) : '–'}</b><span>last spin</span></div></div>
+        ${c.notes ? `<p class="small" style="margin:0">${esc(c.notes)}</p>` : ''}
+        ${meta.length ? `<div class="row small">${meta.map(([k, v]) => `<span class="badge">${esc(k)}: ${esc(v)}</span>`).join('')}</div>` : ''}
+      </section>
+      <section class="card stack">
+        <div class="spread"><h2>Dealers</h2><button class="btn primary" data-act="new-dealer">Add dealer</button></div>
+        <input class="in" id="dealer-search" type="search" placeholder="Search name, table or notes" aria-label="Search dealers" value="${esc(prefs.dealerQuery || '')}">
+        <div class="chips" role="group" aria-label="Dealer status">${['active', 'archived', 'all'].map((f) => `<button class="chip" data-act="dealer-filter" data-f="${f}" aria-pressed="${prefs.dealerFilter === f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>
+        <div class="list" id="dealer-list">${dealerListHtml(c)}</div>
+      </section>`;
+  }
+
+  function dealerListHtml(c) {
+    const q = (prefs.dealerQuery || '').trim().toLowerCase();
+    const ds = dealersOf(c.id).filter((d) => (prefs.dealerFilter === 'all' || (prefs.dealerFilter === 'archived') === (d.status === 'archived'))
+      && (!q || [d.name, d.table, d.notes].some((x) => String(x || '').toLowerCase().includes(q))));
+    if (!ds.length) return `<p class="muted small" style="margin:6px 0">${dealersOf(c.id).length ? 'No dealers match.' : 'No dealers yet. Add the first one to start recording spins.'}</p>`;
+    return ds.map((d) => {
+      const n = spinsOf(d.id).length;
+      return `<button class="item" data-act="dealer" data-id="${d.id}"><div class="grow"><div class="name">${esc(d.name)}</div>
+        <div class="meta">${d.table ? `Table ${esc(d.table)} · ` : ''}<span class="num">${n.toLocaleString()}</span> spins · ${d.wheel === 'US' ? 'American' : 'European'} · ${ago(lastActivity(d.id))}</div></div>
+        ${d.status === 'archived' ? '<span class="badge">Archived</span>' : ''}<span class="chev">›</span></button>`;
+    }).join('');
+  }
+
+  function renderTabs() {
+    const tabs = [['record', 'Record'], ['history', 'History'], ['stats', 'Stats'], ['predict', 'Predict']];
+    return `<div class="tabs-in">${tabs.map(([k, l]) => `<button class="tab" data-act="tab" data-tab="${k}" ${V.tab === k ? 'aria-current="page"' : ''}>${ICON[k]}<span>${l}</span></button>`).join('')}</div>`;
+  }
+
+  function renderDealer() {
+    const d = S.dealers[V.dealerId];
+    V.tab = V.tab || 'record';
+    const arch = d.status === 'archived' ? '<div class="notice">This dealer is archived. History, statistics and saved estimates stay available.</div>' : '';
+    return arch + ({ record: renderRecord, history: renderHistory, stats: renderStats, predict: renderPredict }[V.tab])(d);
+  }
+
+  // ----- record -----
+  function hcLine(d) {
+    const win = prefs.swin[d.id] ?? 'all';
+    const pockets = C.windowed(spinsOf(d.id), win).map((s) => s.pocket);
+    if (pockets.length < 10) return '';
+    const hc = C.hotCold(pockets, wheelOf(d), 3);
+    return `<button class="hc-line" data-act="tab" data-tab="stats" aria-label="Hot and cold numbers, open Stats">
+      <span class="eyebrow hc-hot">Hot</span>${hc.hot.map((h) => pk(h.pocket)).join('')}
+      <span class="eyebrow hc-cold">Cold</span>${hc.cold.map((h) => pk(h.pocket)).join('')}
+      <span class="small muted">${win === 'all' ? 'all' : `last ${win}`}</span></button>`;
+  }
+
+  function renderRecord(d) {
+    const w = wheelOf(d);
+    const recent = spinsOf(d.id).slice(-30).reverse();
+    const key = (p) => `<button class="key ${C.colorOf(p)}" data-act="rec" data-p="${p}" aria-label="Record ${C.label(p)}">${C.label(p)}</button>`;
+    const rows = [];
+    for (let n = 1; n <= 36; n++) rows.push(key(n));
+    return `<section class="card stack"><div class="spread"><span class="eyebrow">Last spins · newest first</span><span class="small muted num">${spinsOf(d.id).length} total</span></div>
+        <div class="strip" id="strip">${recent.length ? recent.map((s) => pk(s.pocket)).join('') : '<span class="muted small">No spins yet. Tap the winning pocket below.</span>'}</div>
+        <div id="hc-line">${hcLine(d)}</div></section>
+      <section class="card stack">
+        <div class="grid2">
+          <label class="f"><span>Session or table visit</span><input class="in" id="rec-session" placeholder="e.g. Sat evening" value="${esc(prefs.session[d.id] || '')}"></label>
+          <label class="f"><span>Spin time</span><input class="in" id="rec-time" type="datetime-local" step="1" value="${customTime ? toLocalInput(customTime) : ''}" aria-describedby="time-help"></label>
+        </div>
+        <div class="small muted" id="time-help">${customTime ? `Using a fixed time. <button class="btn" style="min-height:30px;padding:2px 10px" data-act="time-now">Use current time</button>` : 'Leave the time empty to stamp each spin with the current time.'}</div>
+        <div class="keypad" role="group" aria-label="${esc(w.name)} layout"><div class="zeros">${key(0)}${w.size === 38 ? key(C.DOUBLE_ZERO) : ''}</div>${rows.join('')}</div>
+        <div class="row"><button class="btn" data-act="bulk">Paste past results</button><span class="small muted">${esc(w.name)}</span></div>
+      </section>`;
+  }
+
+  // ----- history -----
+  function renderHistory(d) {
+    const all = C.activeSpins(allSpinsOf(d.id).filter((s) => hist.showDel || !s.del));
+    const sessions = [...new Set(all.map((s) => s.session).filter(Boolean))];
+    const from = hist.from ? new Date(`${hist.from}T00:00:00`).getTime() : -Infinity;
+    const to = hist.to ? new Date(`${hist.to}T23:59:59.999`).getTime() : Infinity;
+    let rows = all.filter((s) => s.t >= from && s.t <= to && (!hist.session || (hist.session === '__none' ? !s.session : s.session === hist.session)));
+    const total = rows.length;
+    if (hist.sort === 'desc') rows = rows.slice().reverse();
+    rows = rows.slice(0, hist.limit);
+    let lastDay = '', body = '';
+    for (const s of rows) {
+      const day = fmtDay(s.t);
+      if (day !== lastDay) { body += `<div class="eyebrow" style="padding:12px 0 4px">${esc(day)}</div>`; lastDay = day; }
+      body += `<button class="item" data-act="edit-spin" data-id="${s.id}" style="${s.del ? 'opacity:.55' : ''}">${pk(s.pocket)}<div class="grow"><div class="num small">${fmtClock(s.t)}</div>
+        <div class="meta">${[s.session, s.notes].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div></div>
+        ${s.log?.length ? '<span class="badge">Edited</span>' : ''}${s.del ? '<span class="badge bad">Deleted</span>' : ''}</button>`;
+    }
+    return `<section class="card stack">
+        <div class="chips">${[['desc', 'Newest first'], ['asc', 'Oldest first']].map(([k, l]) => `<button class="chip" data-act="hsort" data-v="${k}" aria-pressed="${hist.sort === k}">${l}</button>`).join('')}</div>
+        <div class="grid2">
+          <label class="f"><span>From</span><input class="in" type="date" id="h-from" value="${hist.from}"></label>
+          <label class="f"><span>To</span><input class="in" type="date" id="h-to" value="${hist.to}"></label>
+        </div>
+        <label class="f"><span>Session</span><select class="in" id="h-session"><option value="">All sessions</option><option value="__none" ${hist.session === '__none' ? 'selected' : ''}>No session label</option>${sessions.map((x) => `<option ${hist.session === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+        <label class="row small"><input type="checkbox" id="h-del" ${hist.showDel ? 'checked' : ''}> Show deleted spins</label>
+        <div class="small muted">${total.toLocaleString()} spin${total === 1 ? '' : 's'} match. Tap a spin to correct or delete it.</div>
+      </section>
+      <section class="card"><div class="list">${body || '<p class="muted small">No spins match these filters.</p>'}</div>
+        ${total > hist.limit ? `<button class="btn block" data-act="hmore" style="margin-top:8px">Show ${Math.min(300, total - hist.limit)} more</button>` : ''}</section>`;
+  }
+
+  // ----- stats -----
+  function windowChips(act, cur) {
+    return `<div class="chips" role="group" aria-label="Analysis window">${WINDOWS.map((w) => `<button class="chip" data-act="${act}" data-v="${w}" aria-pressed="${String(cur) === String(w)}">${w === 'all' ? 'All spins' : `Last ${w}`}</button>`).join('')}</div>`;
+  }
+
+  function barRows(items, domain, opts = {}) {
+    return items.map((it) => {
+      const w = (x) => `${Math.min(100, (x / domain) * 100).toFixed(2)}%`;
+      const ci = it.ci ? `<span class="ci" style="left:${w(it.ci[0])};width:calc(${w(it.ci[1])} - ${w(it.ci[0])})"></span>` : '';
+      return `<div class="bar-row" data-tip="${esc(it.tip || '')}"><span class="lab">${it.labelHtml || esc(it.label)}</span>
+        <span class="track"><span class="fill ${opts.alt ? 'alt' : ''}" style="width:${w(it.value)}"></span>${ci}<span class="tick ${opts.alt ? 'base' : ''}" style="left:calc(${w(it.ref)} - 1px)"></span></span>
+        <span class="val"><b>${pct(it.value, opts.d ?? 1)}</b> / ${pct(it.ref, opts.d ?? 1)}</span></div>`;
+    }).join('');
+  }
+
+  function hotColdCard(hc, w, win) {
+    const winTxt = win === 'all' ? 'all spins' : `the last ${Math.min(win, hc.n)} spins`;
+    const item = (h, kind) => {
+      const flag = h.pAdj < 0.05;
+      const seen = h.gap === null ? 'not seen' : h.gap === 0 ? 'last spin' : `${h.gap} spin${h.gap === 1 ? '' : 's'} ago`;
+      return `<div class="hc-item${flag ? ' hc-flag' : ''}" data-tip="${esc(`${C.label(h.pocket)}: ${h.count} hits vs ${h.expected.toFixed(1)} expected in ${winTxt}; last seen ${seen}.${flag ? ' Unusual even after allowing for 37 numbers.' : ''}`)}">
+        ${pk(h.pocket, 'lg')}<div class="stack" style="gap:1px;min-width:0"><b class="num">${h.count} hit${h.count === 1 ? '' : 's'}</b><span class="small muted">${esc(seen)}</span></div>
+        ${flag ? `<span class="badge ${kind === 'hot' ? 'good' : 'bad'}">Unusual</span>` : ''}</div>`;
+    };
+    const flagged = [...hc.hot, ...hc.cold].filter((h) => h.pAdj < 0.05);
+    const verdict = hc.n < 5 * w.size
+      ? `<div class="verdict na"><span class="ico">i</span><div>With ${hc.n} spins each number is expected only ${hc.expected.toFixed(1)} times, so hot and cold lists mostly reflect luck. ${5 * w.size}+ spins give a fairer picture.</div></div>`
+      : flagged.length
+        ? `<div class="verdict flag"><span class="ico">!</span><div><b>${flagged.map((h) => C.label(h.pocket)).join(', ')} stand${flagged.length === 1 ? 's' : ''} out</b> beyond what chance usually produces across 37 numbers. Check for entry mistakes, then watch whether it holds on new spins.</div></div>`
+        : `<div class="verdict ok"><span class="ico">✓</span><div><b>Within normal variation.</b> On a fair wheel some numbers always run hot or cold; none here is more extreme than chance across 37 numbers would allow.</div></div>`;
+    return `<section class="card stack"><div class="spread"><h2>Hot and cold</h2><span class="small muted">this dealer · ${esc(winTxt)}</span></div>
+      <p class="small muted" style="margin:0">Expected per number: <span class="num">${hc.expected.toFixed(1)}</span> hits.</p>
+      <div class="hc-grid"><div class="stack" style="gap:6px"><span class="eyebrow hc-hot">Hot · most hits</span>${hc.hot.map((h) => item(h, 'hot')).join('')}</div>
+        <div class="stack" style="gap:6px"><span class="eyebrow hc-cold">Cold · fewest hits</span>${hc.cold.map((h) => item(h, 'cold')).join('')}</div></div>
+      ${verdict}
+      <p class="small muted" style="margin:0">Hot and cold describe the past. On a fair wheel a hot number isn't more likely next and a cold one isn't "due".</p></section>`;
+  }
+
+  function renderStats(d) {
+    const w = wheelOf(d);
+    const win = prefs.swin[d.id] ?? 'all';
+    const all = spinsOf(d.id);
+    const sp = C.windowed(all, win);
+    const pockets = sp.map((s) => s.pocket);
+    const n = pockets.length;
+    const head = `<section class="card stack"><span class="eyebrow">Observed · describes past spins only</span>${windowChips('swin', win)}</section>`;
+    if (!n) return `${head}<section class="card empty"><h2>No spins yet</h2><p class="muted small">Record spins on the Record tab and the statistics appear here.</p><button class="btn primary" data-act="tab" data-tab="record">Record spins</button></section>`;
+    const sessions = new Set(sp.map((s) => s.session).filter(Boolean)).size;
+    const need = 5 * w.size;
+    const cats = C.categoryStats(pockets, w);
+    const cnt = C.counts(pockets, w.size);
+    const e = n / w.size;
+    const chi = C.chiSquare(cnt);
+    const gaps = C.gaps(pockets, w);
+    const st = C.streaks(pockets);
+
+    const catHtml = cats.map((g) => {
+      const domain = Math.min(1, Math.max(...g.items.map((i) => Math.max(i.ci[1], i.expected))) * 1.15);
+      return `<div class="stack" style="gap:6px"><h3>${esc(g.label)}</h3><div class="bars">${barRows(g.items.map((i) => ({
+        label: i.label, value: i.observed, ref: i.expected, ci: i.ci,
+        tip: `${i.label}: ${i.count} of ${n} (${pct(i.observed)}). Fair wheel: ${pct(i.expected)}. 95% range ${pct(i.ci[0])}–${pct(i.ci[1])}.`,
+      })), domain)}</div></div>`;
+    }).join('');
+
+    const cell = (p) => {
+      const z = (cnt[p] - e) / Math.sqrt(e);
+      const m = Math.round(Math.min(1, Math.abs(z) / 3) * 70);
+      const bg = `color-mix(in oklab, var(${z >= 0 ? '--above' : '--below'}) ${m}%, var(--mid))`;
+      const tip = `${C.label(p)}: ${cnt[p]} hit${cnt[p] === 1 ? '' : 's'} (expected ${e.toFixed(1)}). ${gaps[p] === null ? 'Not seen in this window.' : `Last seen ${gaps[p]} spin${gaps[p] === 1 ? '' : 's'} ago.`}`;
+      return `<button class="cell" style="background:${bg}" data-tip="${esc(tip)}" aria-label="${esc(tip)}"><span class="dot" style="background:var(--pocket-${C.colorOf(p)})"></span><span class="n">${C.label(p)}</span><span class="c">${cnt[p]}</span></button>`;
+    };
+    const heat = `<div class="heat"><div class="zeros">${cell(0)}${w.size === 38 ? cell(C.DOUBLE_ZERO) : ''}</div>${Array.from({ length: 36 }, (_, i) => cell(i + 1)).join('')}</div>`;
+
+    let verdict;
+    if (!chi.valid) verdict = `<div class="verdict na"><span class="ico">i</span><div>Not enough spins for a pocket-level test yet: it needs at least ${need} (5 expected per pocket). This window has ${n}.</div></div>`;
+    else if (chi.p < 0.01) verdict = `<div class="verdict flag"><span class="ico">!</span><div><b>Unusual for a fair wheel</b> (χ² ${chi.stat.toFixed(1)}, df ${chi.df}, p = ${chi.p.toPrecision(2)}). Check for entry mistakes first. Testing many dealers and windows will also turn up some unusual results by chance.</div></div>`;
+    else verdict = `<div class="verdict ok"><span class="ico">✓</span><div><b>Consistent with a fair wheel</b> (χ² ${chi.stat.toFixed(1)}, df ${chi.df}, p = ${chi.p.toFixed(2)}). The spread of pocket counts is within what chance alone produces.</div></div>`;
+
+    const absent = w.pockets.map((p) => ({ p, g: gaps[p] })).sort((a, b) => (b.g ?? Infinity) - (a.g ?? Infinity)).slice(0, 8);
+    const streakRow = (lab, r) => `<tr><td>${lab}</td><td>${r.current ? `${esc(r.current)} <span class="num">×${r.currentLen}</span>` : '–'}</td><td>${r.longest ? `${esc(r.longest)} <span class="num">×${r.longestLen}</span>` : '–'}</td></tr>`;
+
+    let compare = '';
+    if (win !== 'all' && all.length >= 2 * win) {
+      const prev = all.slice(-2 * win, -win).map((s) => s.pocket);
+      const pc = C.categoryStats(prev, w);
+      const rows = cats.filter((g) => g.key !== 'column').flatMap((g, gi) => g.items.map((it, ii) => {
+        const before = pc.find((x) => x.key === g.key).items[ii];
+        return `<tr><td>${esc(it.label)}</td><td class="r">${pct(before.observed)}</td><td class="r">${pct(it.observed)}</td><td class="r">${pct(it.expected)}</td></tr>`;
+      }));
+      compare = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Bet</th><th class="r">Prev ${win}</th><th class="r">Last ${win}</th><th class="r">Fair</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    } else {
+      compare = `<p class="small muted" style="margin:0">${win === 'all' ? 'Pick a window (for example Last 100) to compare it with the window before it.' : `Needs ${2 * win} spins to compare two windows of ${win}; this dealer has ${all.length}.`}</p>`;
+    }
+
+    return `${head}
+      <section class="card stack">
+        <div class="tiles"><div class="tile"><b class="num">${n.toLocaleString()}</b><span>spins${win !== 'all' ? ` of ${all.length.toLocaleString()}` : ''}</span></div>
+          <div class="tile"><b class="num">${sessions}</b><span>sessions</span></div>
+          <div class="tile"><b class="num">${((sp[n - 1].t - sp[0].t) / 864e5).toFixed(1)}</b><span>days covered</span></div></div>
+        <div class="small muted">${esc(fmtDT(sp[0].t))} → ${esc(fmtDT(sp[n - 1].t))}</div>
+        <div class="stack" style="gap:4px"><div class="spread small"><span>Sample for pocket-level analysis</span><span class="num">${Math.min(n, need)}/${need}</span></div><div class="meter"><i style="width:${Math.min(100, (n / need) * 100)}%"></i></div></div>
+      </section>
+      ${hotColdCard(C.hotCold(pockets, w), w, win)}
+      <section class="card stack"><div class="spread"><h2>Recent results</h2><span class="small muted">newest first</span></div><div class="strip">${sp.slice(-30).reverse().map((s) => pk(s.pocket)).join('')}</div></section>
+      <section class="card stack"><h2>Outside bets</h2><p class="small muted" style="margin:0">Bar = observed share, whisker = 95% range for that share, gold tick = fair-wheel expectation.</p>${catHtml}</section>
+      <section class="card stack"><h2>Pocket counts</h2>
+        <p class="small muted" style="margin:0">Counts per pocket in this window, laid out like the betting table. Expected per pocket: <span class="num">${e.toFixed(1)}</span>. Tap a pocket for detail.</p>
+        ${heat}
+        <div class="stack" style="gap:3px"><div class="legend-ramp"></div><div class="spread small muted"><span>Fewer than expected</span><span>As expected</span><span>More</span></div></div>
+        ${verdict}
+      </section>
+      <section class="card stack"><h2>Streaks</h2>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Bet</th><th>Current</th><th>Longest</th></tr></thead><tbody>
+          ${streakRow('Colour', st.color)}${streakRow('Odd / even', st.parity)}${streakRow('Low / high', st.range)}${streakRow('Dozen', st.dozen)}</tbody></table></div>
+        <p class="small muted" style="margin:0">Same pocket twice in a row: <span class="num">${st.repeats}</span> times (about <span class="num">${((n - 1) / w.size).toFixed(1)}</span> expected by chance).</p>
+      </section>
+      <section class="card stack"><h2>Longest absent</h2>
+        <div class="row">${absent.map((a) => `<span class="row" style="gap:5px">${pk(a.p)}<span class="small num">${a.g === null ? 'not seen' : `${a.g} spins`}</span></span>`).join('')}</div>
+        <p class="small muted" style="margin:0">A pocket that hasn't appeared for a while is not "due". On a fair wheel its chance on the next spin is unchanged.</p>
+      </section>
+      <section class="card stack"><h2>Window comparison</h2>${compare}</section>`;
+  }
+
+  // ----- suggested bet -----
+  const BET_OPTS = [
+    { key: 'n5', mode: 'neighbours', k: 5, label: 'Neighbours (5)' },
+    { key: 't3', mode: 'top', k: 3, label: 'Top 3' },
+    { key: 't5', mode: 'top', k: 5, label: 'Top 5' },
+    { key: 'a7', mode: 'arc', k: 7, label: 'Best 7 on wheel' },
+    { key: 'a9', mode: 'arc', k: 9, label: 'Best 9 on wheel' },
+    { key: 'a12', mode: 'arc', k: 12, label: 'Best 12 on wheel' },
+  ];
+  const betOpt = () => BET_OPTS.find((o) => o.key === prefs.sector) || BET_OPTS[0];
+  const money = (x, sign = true) => {
+    const v = Math.abs(x) < 0.005 ? 0 : x;
+    const t = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return sign ? (v > 0 ? '+' : v < 0 ? '−' : '') + t : t;
+  };
+  const POCKET_FILL = { red: 'var(--pocket-red)', black: 'var(--pocket-black)', green: 'var(--pocket-green)' };
+
+  // The wheel as seen from above, sector lit and everything else dimmed.
+  function wheelSvg(w, sector, pickP) {
+    const order = C.WHEEL_ORDER[w.type], N = order.length, step = 360 / N;
+    const on = new Set(sector.pockets);
+    const R = 138, r = 96, rad = (deg) => (deg * Math.PI) / 180;
+    const pt = (rr, deg) => `${(rr * Math.sin(rad(deg))).toFixed(2)} ${(-rr * Math.cos(rad(deg))).toFixed(2)}`;
+    const segs = order.map((p, i) => {
+      const a0 = i * step - step / 2, a1 = a0 + step, lit = on.has(p) || p === pickP;
+      return `<g opacity="${lit ? 1 : 0.22}"><path d="M${pt(r, a0)} L${pt(R, a0)} A${R} ${R} 0 0 1 ${pt(R, a1)} L${pt(r, a1)} A${r} ${r} 0 0 0 ${pt(r, a0)}Z" fill="${POCKET_FILL[C.colorOf(p)]}" stroke="var(--surface)" stroke-width="1"/>
+        <text transform="rotate(${(i * step).toFixed(2)}) translate(0 ${-(R + r) / 2 - 4})" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="${p === pickP ? 14 : 11.5}" font-weight="600" font-family="var(--f-display)">${C.label(p)}</text></g>`;
+    }).join('');
+    let arc;
+    if (sector.contiguous) {
+      const i0 = order.indexOf(sector.pockets[0]);
+      const a0 = i0 * step - step / 2, a1 = a0 + sector.pockets.length * step;
+      arc = `<path d="M${pt(R + 7, a0)} A${R + 7} ${R + 7} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${pt(R + 7, a1)}" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>`;
+    } else {
+      arc = sector.pockets.map((p) => { const a = order.indexOf(p) * step; return `<path d="M${pt(R + 7, a - step / 2 + 1)} A${R + 7} ${R + 7} 0 0 1 ${pt(R + 7, a + step / 2 - 1)}" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>`; }).join('');
+    }
+    const ip = order.indexOf(pickP), pa = ip * step;
+    const pickRing = `<path d="M${pt(r, pa - step / 2)} L${pt(R, pa - step / 2)} A${R} ${R} 0 0 1 ${pt(R, pa + step / 2)} L${pt(r, pa + step / 2)} A${r} ${r} 0 0 0 ${pt(r, pa - step / 2)}Z" fill="none" stroke="var(--accent)" stroke-width="3.5"/>
+      <path d="M${pt(R + 22, pa - 3.2)} L${pt(R + 12, pa)} L${pt(R + 22, pa + 3.2)}Z" fill="var(--accent)"/>`;
+    return `<svg class="wheel-big" viewBox="-165 -165 330 330" role="img" aria-label="Wheel with sector ${sector.pockets.map(C.label).join(', ')} highlighted and ${C.label(pickP)} marked as the pick">
+      <circle r="${R + 2}" fill="var(--surface-2)"/>${segs}${arc}${pickRing}
+      <circle r="${r - 1}" fill="var(--surface-2)"/><circle r="${r - 14}" fill="var(--surface)" stroke="var(--line)"/>
+      <text y="-22" text-anchor="middle" fill="var(--muted)" font-size="11" font-family="var(--f-body)" letter-spacing="1.5">PICK</text>
+      <text y="22" text-anchor="middle" fill="var(--fg)" font-size="56" font-weight="600" font-family="var(--f-display)">${C.label(pickP)}</text></svg>`;
+  }
+
+  // Betting-table layout (zero column, then 12 columns of 3) with the sector lit.
+  function tableMini(w, sector, pickP) {
+    const on = new Set(sector.pockets);
+    const cell = (p, style) => `<span class="tm ${C.colorOf(p)}${on.has(p) ? ' on' : ''}${p === pickP ? ' pick' : ''}" style="${style}">${C.label(p)}</span>`;
+    const zeros = w.size === 38
+      ? cell(C.DOUBLE_ZERO, 'grid-row:1 / 4;grid-column:1') + cell(0, 'grid-row:4 / 7;grid-column:1')
+      : cell(0, 'grid-row:1 / 7;grid-column:1');
+    let nums = '';
+    for (let col = 0; col < 12; col++) for (let row = 0; row < 3; row++) {
+      const p = col * 3 + (3 - row);
+      nums += cell(p, `grid-row:${row * 2 + 1} / span 2;grid-column:${col + 2}`);
+    }
+    return `<div class="tbl-wrap"><div class="tmini" aria-label="Betting table with sector numbers highlighted">${zeros}${nums}</div></div>`;
+  }
+
+  function renderPick(d, w, probs, pockets, win, all) {
+    const opt = betOpt(), k = opt.k;
+    const stake = prefs.stake > 0 ? prefs.stake : 10;
+    const pk0 = prefs.model === 'baseline' || !pockets.length ? null : C.pick(probs, pockets, w);
+    const head = `<div class="spread"><h2>Suggested bet</h2><span class="badge">Not a guarantee</span></div>`;
+    if (!pk0) {
+      return `<section class="card stack">${head}<div class="verdict na"><span class="ico">i</span><div>${prefs.model === 'baseline'
+        ? 'The baseline gives every pocket the same chance, so it has no pick. Choose Historical or Smoothed frequency above.'
+        : pockets.length ? 'Every pocket has the same count in this window, so there is no pick yet.' : 'Record spins for this dealer to get a pick.'}</div></div></section>`;
+    }
+    const sec = C.bestSector(probs, w, k, pk0.pocket, opt.mode, C.gaps(pockets, w));
+    const cnt = C.counts(pockets, w.size);
+    const bt = C.pickBacktest(all.map((s) => s.pocket), w, win, k, 20, opt.mode);
+    const e1 = C.betEconomics(1, stake, pk0.p), eK = C.betEconomics(k, stake, sec.p);
+    const f1 = C.betEconomics(1, stake, 1 / w.size), fK = C.betEconomics(k, stake, k / w.size);
+    const secName = opt.mode === 'neighbours' ? 'Neighbours' : opt.mode === 'top' ? `Top ${k}` : `Best ${k}`;
+    const pastPick = bt.pickHits * e1.back - bt.scored * e1.cost, pastK = bt.sectorHits * eK.back - bt.scored * eK.cost;
+    const evCell = (x) => `<td class="r" style="color:${x < 0 ? 'var(--bad)' : x > 0 ? 'var(--good)' : 'inherit'}">${money(x)}</td>`;
+    const costHtml = `<div class="stack" style="gap:8px">
+        <label class="f" style="max-width:220px"><span>Chip per number</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
+        <div class="tbl-wrap"><table class="tbl money"><thead><tr><th></th><th class="r">Pick ${C.label(pk0.pocket)}</th><th class="r">${secName} (${k})</th></tr></thead><tbody>
+          <tr><td>Cost per spin</td><td class="r">${money(e1.cost, false)}</td><td class="r">${money(eK.cost, false)}</td></tr>
+          <tr><td>Paid back if it hits</td><td class="r">${money(e1.back, false)}</td><td class="r">${money(eK.back, false)}</td></tr>
+          <tr><td>Profit if it hits</td>${evCell(e1.winProfit)}${evCell(eK.winProfit)}</tr>
+          <tr><td>Loss if it misses</td>${evCell(e1.lossIfMiss)}${evCell(eK.lossIfMiss)}</tr>
+          <tr><td>Chance it hits, model</td><td class="r">${pct(pk0.p)}</td><td class="r">${pct(sec.p)}</td></tr>
+          <tr><td>Chance it hits, fair wheel</td><td class="r">${pct(1 / w.size)}</td><td class="r">${pct(k / w.size)}</td></tr>
+          <tr><td>Expected per spin, fair wheel</td>${evCell(f1.ev)}${evCell(fK.ev)}</tr>
+          <tr><td>Expected per spin, if model is right</td>${evCell(e1.ev)}${evCell(eK.ev)}</tr>
+          ${bt.scored >= 30 ? `<tr><td>Result replaying ${bt.scored} past spins</td>${evCell(pastPick)}${evCell(pastK)}</tr>` : ''}
+        </tbody></table></div>
+        <p class="small muted" style="margin:0">One chip on each number, straight up, paid 35 to 1 (your chip comes back too). Only one number can hit per spin. On a fair ${w.size === 38 ? 'American' : 'European'} wheel every straight-up bet loses ${pct(1 / w.size, 2)} of the amount staked on average; the "if model is right" line only holds if the estimate is real, which the track record tests.</p></div>`;
+    let record;
+    if (bt.scored < 30) record = `<div class="verdict na"><span class="ico">i</span><div>Track record needs at least 50 spins for this dealer; there are ${all.length}.</div></div>`;
+    else {
+      const flag = bt.sectorP < 0.01 || bt.pickP < 0.01;
+      record = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Following this rule</th><th class="r">Hits</th><th class="r">Hit rate</th><th class="r">Chance</th></tr></thead><tbody>
+          <tr><td>Bet the pick</td><td class="r">${bt.pickHits}/${bt.scored}</td><td class="r">${pct(bt.pickRate)}</td><td class="r">${pct(bt.pickBase)}</td></tr>
+          <tr><td>Bet ${secName.toLowerCase()} (${k})</td><td class="r">${bt.sectorHits}/${bt.scored}</td><td class="r">${pct(bt.sectorRate)}</td><td class="r">${pct(bt.sectorBase)}</td></tr></tbody></table></div>
+        ${flag
+          ? `<div class="verdict flag"><span class="ico">!</span><div><b>Hit more often than chance</b> on this dealer's past spins (p = ${Math.min(bt.pickP, bt.sectorP).toPrecision(2)}). Re-test on new spins before trusting it.</div></div>`
+          : `<div class="verdict ok"><span class="ico">✓</span><div><b>In line with chance.</b> Replaying ${bt.scored} past spins, choosing numbers this way hit about as often as random numbers would.</div></div>`}`;
+    }
+    return `<section class="card stack pick-card">${head}
+      <div class="pick-hero">${pk(pk0.pocket, 'xl')}<div class="stack" style="gap:2px;min-width:0">
+        <span class="eyebrow">Single number · ${money(stake, false)} chip pays ${money(35 * stake, false)}</span>
+        <span><b class="num">${pct(pk0.p, 2)}</b> estimate vs <span class="num">${pct(1 / w.size, 2)}</span> fair</span>
+        <span class="small muted">Seen ${cnt[pk0.pocket]} times in ${win === 'all' ? 'all' : `the last ${win}`} spins${pk0.tied > 1 ? `; tied with ${pk0.tied - 1} other${pk0.tied > 2 ? 's' : ''}, picked the most recent` : ''}.</span></div></div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">Multi-number bet</span>
+        <div class="chips" role="group" aria-label="Multi-number bet">${BET_OPTS.map((o) => `<button class="chip" data-act="sector" data-v="${o.key}" aria-pressed="${opt.key === o.key}">${o.label}</button>`).join('')}</div></div>
+      ${wheelSvg(w, sec, pk0.pocket)}
+      <div class="stack" style="gap:6px"><span class="eyebrow">${opt.mode === 'neighbours' ? `Neighbours bet · ${C.label(pk0.pocket)} and 2 either side, in wheel order` : opt.mode === 'top' ? `Top ${k} numbers by estimate, best first` : `Strongest ${k}-pocket stretch of the wheel, in wheel order`}</span>
+        <div class="row sector-row">${sec.pockets.map((p) => pk(p, p === pk0.pocket ? 'lg is-pick' : 'lg')).join('')}</div>
+        <span class="small">Covers ${k} of ${w.size} pockets: <b class="num">${pct(sec.p)}</b> estimate vs <span class="num">${pct(sec.base)}</span> fair.${sec.hasPick ? '' : ' The pick sits outside this stretch.'}</span></div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">On the table</span>${tableMini(w, sec, pk0.pocket)}</div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">Cost and payout</span>${costHtml}</div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">Track record on this dealer</span>${record}</div>
+    </section>`;
+  }
+
+  // ----- predict -----
+  function renderPredict(d) {
+    const w = wheelOf(d);
+    const win = prefs.pwin[d.id] ?? 100;
+    const model = prefs.model;
+    const alpha = prefs.alpha;
+    const all = spinsOf(d.id);
+    const sp = C.windowed(all, win);
+    const pockets = sp.map((s) => s.pocket);
+    const n = pockets.length;
+    const probs = C.predict(model, pockets, w, { alpha });
+    const base = 1 / w.size;
+    const cnt = C.counts(pockets, w.size);
+    const order = w.pockets.slice().sort((a, b) => probs[b] - probs[a] || a - b);
+    const top = order.slice(0, 10);
+    const modelInfo = C.MODELS.find((m) => m.id === model);
+    const domain = Math.max(base, ...top.map((p) => Math.max(probs[p], n ? C.wilson(cnt[p], n)[1] : 0))) * 1.12;
+
+    const pocketBars = model === 'baseline'
+      ? `<p class="small" style="margin:0">Every pocket: <b class="num">${pct(base, 2)}</b>. The baseline ignores history.</p>`
+      : `<div class="bars">${barRows(top.map((p) => ({
+        labelHtml: `${pk(p)}`, value: probs[p], ref: base, ci: n ? C.wilson(cnt[p], n) : null,
+        tip: `${C.label(p)}: estimate ${pct(probs[p], 2)} vs ${pct(base, 2)} baseline. Seen ${cnt[p]} of ${n}; 95% range for its observed rate ${pct(C.wilson(cnt[p], n)[0], 1)}–${pct(C.wilson(cnt[p], n)[1], 1)}.`,
+      })), domain, { alt: true, d: 2 })}</div>
+      <p class="small muted" style="margin:0">Bar = estimate, whisker = 95% range of the observed rate, grey tick = baseline ${pct(base, 2)}. Overlapping whiskers and tick mean the data can't tell this pocket from any other.</p>`;
+
+    const allTable = `<details><summary>All ${w.size} pockets</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pocket</th><th class="r">Estimate</th><th class="r">vs base</th><th class="r">Seen</th><th class="r">95% range</th></tr></thead><tbody>
+      ${order.map((p) => { const ci = C.wilson(cnt[p], n); return `<tr><td>${pk(p)}</td><td class="r">${pct(probs[p], 2)}</td><td class="r">${(probs[p] - base >= 0 ? '+' : '') + ((probs[p] - base) * 100).toFixed(2)}</td><td class="r">${cnt[p]}</td><td class="r">${n ? `${pct(ci[0])}–${pct(ci[1])}` : '–'}</td></tr>`; }).join('')}
+      </tbody></table></div></details>`;
+
+    const cp = C.categoryProbs(probs, w);
+    const catHtml = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Bet</th><th class="r">Estimate</th><th class="r">Baseline</th><th class="r">Diff</th></tr></thead><tbody>
+      ${cp.flatMap((g) => g.items.map((i) => `<tr><td>${esc(i.label)}</td><td class="r">${pct(i.p)}</td><td class="r">${pct(i.base)}</td><td class="r">${(i.p - i.base >= 0 ? '+' : '') + ((i.p - i.base) * 100).toFixed(1)}</td></tr>`)).join('')}
+      </tbody></table></div>`;
+
+    const bt = C.backtest(all.map((s) => s.pocket), w, win, { alpha });
+    let btHtml;
+    if (bt.scored < 30) {
+      btHtml = `<div class="verdict na"><span class="ico">i</span><div>A backtest needs at least 50 spins (20 to start from, 30 to score). This dealer has ${all.length}.</div></div>`;
+    } else {
+      const rows = C.MODELS.map((m) => {
+        const r = bt.models[m.id];
+        const tag = m.id === 'baseline' ? '' : r.beats ? '<span class="badge good">Beats baseline</span>' : r.worse ? '<span class="badge bad">Worse</span>' : '<span class="badge">No edge</span>';
+        return `<tr><td>${esc(m.name)} ${tag}</td><td class="r">${fix(r.logLoss)}</td><td class="r">${m.id === 'baseline' ? '–' : `${r.diff >= 0 ? '+' : ''}${fix(r.diff)} ±${fix(2 * r.se)}`}</td><td class="r">${fix(r.brier, 4)}</td></tr>`;
+      }).join('');
+      const anyBeats = bt.models.frequency.beats || bt.models.smoothed.beats;
+      btHtml = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Model</th><th class="r">Log loss</th><th class="r">vs baseline</th><th class="r">Brier</th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${anyBeats
+          ? `<div class="verdict flag"><span class="ico">!</span><div><b>A model scored better than the baseline</b> by more than two standard errors over ${bt.scored} spins. Treat this as a lead to re-test on new spins, not proof of an edge.</div></div>`
+          : `<div class="verdict ok"><span class="ico">✓</span><div><b>No evidence of an edge.</b> Over ${bt.scored} spins, no model predicted this dealer's next spin better than the fair-wheel baseline.</div></div>`}`;
+    }
+
+    const preds = predsOf(d.id);
+    const evals = preds.map((p) => ({ p, e: C.evaluate(p, allSpinsOf(d.id)) }));
+    const done = evals.filter((x) => x.e);
+    const agg = done.length ? {
+      ll: C.mean(done.map((x) => x.e.logLoss)), bll: C.mean(done.map((x) => x.e.baseLogLoss)),
+      br: C.mean(done.map((x) => x.e.brier)), bbr: C.mean(done.map((x) => x.e.baseBrier)),
+    } : null;
+    const savedHtml = preds.length ? `
+      ${agg ? `<div class="tiles"><div class="tile"><b class="num">${done.length}</b><span>scored of ${preds.length}</span></div><div class="tile"><b class="num">${fix(agg.ll, 2)}</b><span>mean log loss</span></div><div class="tile"><b class="num">${fix(agg.bll, 2)}</b><span>baseline</span></div></div>
+        ${(() => { const ps = done.filter((x) => x.p.pick != null); if (!ps.length) return '';
+          const ph = ps.filter((x) => x.e.pickHit).length, sh = ps.filter((x) => x.e.sectorHit).length;
+          const expS = C.mean(ps.map((x) => x.p.sector.length / x.p.probs.length));
+          return `<p class="small" style="margin:0">Saved picks hit <b class="num">${ph}/${ps.length}</b> (chance ${pct(1 / w.size)}); sectors hit <b class="num">${sh}/${ps.length}</b> (chance ${pct(expS)}).</p>`; })()}
+        <p class="small muted" style="margin:0">Lower log loss is better. ${done.length < 30 ? 'Fewer than 30 scored estimates; the comparison is not reliable yet.' : agg.ll < agg.bll ? 'Saved estimates have scored better than the baseline so far.' : 'Saved estimates have not beaten the baseline.'}</p>` : '<p class="small muted" style="margin:0">Saved estimates are scored against the next spin recorded after them.</p>'}
+      <div class="list">${evals.slice(0, 25).map(({ p, e }) => {
+        const best = p.pick ?? p.probs.indexOf(Math.max(...p.probs));
+        const hit = (h) => (h ? '<span class="badge good">Hit</span>' : '<span class="badge">Miss</span>');
+        return `<div class="item"><div class="grow"><div class="small"><b>${esc(C.MODELS.find((m) => m.id === p.model)?.name || p.model)}</b> v${esc(p.modelVersion)} · ${p.window === 'all' ? 'all' : `last ${p.window}`} · n=${p.n}${p.params?.alpha != null && p.model === 'smoothed' ? ` · α=${p.params.alpha}` : ''}</div>
+          <div class="meta">${esc(fmtDT(p.createdAt))} · pick ${C.label(best)} at ${pct(p.probs[best], 2)}${p.sector ? ` · sector ${p.sector.map(C.label).join(' ')}` : ''}</div>
+          ${e && p.pick != null ? `<div class="row" style="gap:6px;margin-top:3px"><span class="small">Pick</span>${hit(e.pickHit)}${p.stake ? `<span class="small num">${money(e.pickHit ? 35 * p.stake : -p.stake)}</span>` : ''}<span class="small">Multi</span>${hit(e.sectorHit)}${p.stake ? `<span class="small num">${money((e.sectorHit ? 36 * p.stake : 0) - p.sector.length * p.stake)}</span>` : ''}</div>` : ''}
+          <div class="meta">${e ? `Next spin ${pk(e.pocket)} got ${pct(e.p, 2)} (rank ${e.rank}) · log loss <span class="num">${fix(e.logLoss, 2)}</span> vs <span class="num">${fix(e.baseLogLoss, 2)}</span>` : 'Waiting for the next spin'}</div></div></div>`;
+      }).join('')}</div>` : '<p class="small muted" style="margin:0">No saved estimates yet. Save one, record the next spin, and it is scored automatically.</p>';
+
+    return `<div class="notice caution"><strong>Estimates, not guarantees</strong>On a fair wheel each spin is independent: past results don't change the next spin's ${pct(base, 2)} per pocket. The backtest below checks whether any model has done better than that on this dealer's own history.</div>
+      <section class="card stack">
+        <div class="chips" role="group" aria-label="Model">${C.MODELS.map((m) => `<button class="chip" data-act="model" data-v="${m.id}" aria-pressed="${model === m.id}">${esc(m.name)}</button>`).join('')}</div>
+        <p class="small muted" style="margin:0">${esc(modelInfo.desc)}</p>
+        ${windowChips('pwin', win)}
+        ${model === 'smoothed' ? `<label class="f"><span>Smoothing strength α = <b id="alpha-v" class="num">${alpha}</b> pseudo-spins per pocket</span><input id="alpha" type="range" min="1" max="50" step="1" value="${alpha}"></label>` : ''}
+      </section>
+      ${renderPick(d, w, probs, pockets, win, all)}
+      <section class="card stack"><h2>Next-spin estimate</h2>${n || model === 'baseline' ? pocketBars + (model !== 'baseline' ? allTable : '') : '<p class="small muted">No spins in this window yet. The estimate equals the baseline until spins are recorded.</p>'}</section>
+      <section class="card stack"><h2>Outside bets</h2>${catHtml}</section>
+      <section class="card stack"><h2>How this was made</h2>
+        <div class="tbl-wrap"><table class="tbl"><tbody>
+          <tr><td>Model</td><td>${esc(modelInfo.name)} v${C.MODEL_VERSION[model]}${model === 'smoothed' ? ` · α = ${alpha}` : ''}</td></tr>
+          <tr><td>Data</td><td>${win === 'all' ? 'All' : `Last ${win}`} spins of this dealer only · n = ${n}</td></tr>
+          <tr><td>Period</td><td>${n ? `${esc(fmtDT(sp[0].t))} → ${esc(fmtDT(sp[n - 1].t))}` : '–'}</td></tr>
+          <tr><td>Wheel</td><td>${esc(w.name)} · baseline ${pct(base, 2)}</td></tr>
+          <tr><td>Generated</td><td>${esc(fmtDT(Date.now()))}</td></tr>
+        </tbody></table></div>
+        <button class="btn primary block" data-act="save-pred">Save this estimate for scoring</button>
+      </section>
+      <section class="card stack"><h2>Backtest</h2><p class="small muted" style="margin:0">Walk-forward over this dealer's history: each spin is scored using only the ${win === 'all' ? '' : `${win} `}spins before it. Lower log loss and Brier are better.</p>${btHtml}</section>
+      <section class="card stack"><h2>Saved estimates</h2>${savedHtml}</section>`;
+  }
+
+  // ---------- sheets & toast ----------
+  function openSheet(html, mount) {
+    closeSheet();
+    const scrim = document.createElement('div');
+    scrim.className = 'scrim';
+    scrim.id = 'scrim';
+    scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+    scrim.addEventListener('click', (e) => { if (e.target === scrim) closeSheet(); });
+    document.body.appendChild(scrim);
+    const first = scrim.querySelector('input:not([type=hidden]):not([disabled]), select, textarea, button');
+    first?.focus({ preventScroll: true });
+    mount?.(scrim.firstElementChild);
+  }
+  function closeSheet() { $('#scrim')?.remove(); }
+
+  let toastTimer = null;
+  function toast(msg, actLabel, actFn, ms = 4500) {
+    $('#toast')?.remove();
+    clearTimeout(toastTimer);
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.id = 'toast';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `<span></span>${actLabel ? `<button>${esc(actLabel)}</button>` : ''}`;
+    el.firstChild.textContent = msg;
+    if (actLabel) el.querySelector('button').onclick = () => { el.remove(); actFn(); };
+    document.body.appendChild(el);
+    toastTimer = setTimeout(() => el.remove(), ms);
+  }
+
+  // tooltip for chart marks
+  const tipEl = () => $('#tip') || Object.assign(document.body.appendChild(document.createElement('div')), { id: 'tip', className: 'tip', hidden: true });
+  function showTip(target) {
+    const msg = target.dataset.tip;
+    if (!msg) return;
+    const t = tipEl();
+    t.textContent = msg;
+    t.hidden = false;
+    const r = target.getBoundingClientRect();
+    const tw = t.offsetWidth, th = t.offsetHeight;
+    t.style.left = `${Math.max(8, Math.min(innerWidth - tw - 8, r.left + r.width / 2 - tw / 2))}px`;
+    t.style.top = `${r.top - th - 8 < 8 ? r.bottom + 8 : r.top - th - 8}px`;
+  }
+  function hideTip() { const t = $('#tip'); if (t) t.hidden = true; }
+
+  // ---------- forms ----------
+  function casinoForm(c) {
+    const isNew = !c;
+    c = c || { name: '', location: '', notes: '', meta: {}, wheel: 'EU' };
+    const hasDealers = !isNew && dealersOf(c.id).length > 0;
+    openSheet(`<h2>${isNew ? 'Add casino' : 'Edit casino'}</h2>
+      <form data-form="casino" class="stack" data-id="${isNew ? '' : c.id}">
+        <label class="f"><span>Name</span><input class="in" name="name" id="f-cname" required maxlength="80" value="${esc(c.name)}" placeholder="Marina Bay Sands"></label>
+        <label class="f"><span>Location</span><input class="in" name="location" id="f-cloc" maxlength="120" value="${esc(c.location)}" placeholder="Singapore"></label>
+        <label class="f"><span>Default wheel for new dealers</span><select class="in" name="wheel" id="f-cwheel"><option value="EU" ${c.wheel !== 'US' ? 'selected' : ''}>European (single 0)</option><option value="US" ${c.wheel === 'US' ? 'selected' : ''}>American (0 and 00)</option></select></label>
+        <label class="f"><span>Notes</span><textarea class="in" name="notes" id="f-cnotes" maxlength="2000">${esc(c.notes)}</textarea></label>
+        <label class="f"><span>Custom details, one "key: value" per line</span><textarea class="in" name="meta" id="f-cmeta" placeholder="Floor: Level 2&#10;Min bet: 25">${esc(Object.entries(c.meta || {}).map(([k, v]) => `${k}: ${v}`).join('\n'))}</textarea></label>
+        <button class="btn primary block">${isNew ? 'Add casino' : 'Save changes'}</button>
+        ${isNew ? '' : `<div class="row"><button type="button" class="btn" data-act="archive-casino">${c.status === 'archived' ? 'Restore from archive' : 'Archive casino'}</button>
+          <button type="button" class="btn danger" data-act="remove-casino" ${hasDealers ? 'disabled' : ''}>Remove</button></div>
+          ${hasDealers ? '<p class="small muted" style="margin:0">A casino with dealers can only be archived, so their history is kept.</p>' : ''}<div id="confirm-slot"></div>`}
+      </form>`);
+  }
+
+  function dealerForm(d) {
+    const isNew = !d;
+    const c = S.casinos[isNew ? V.casinoId : d.casinoId];
+    d = d || { name: '', table: '', notes: '', wheel: c.wheel, status: 'active' };
+    const locked = !isNew && allSpinsOf(d.id).length > 0;
+    openSheet(`<h2>${isNew ? 'Add dealer' : 'Edit dealer'}</h2>
+      <p class="small muted" style="margin:0">${esc(c.name)}</p>
+      <form data-form="dealer" class="stack" data-id="${isNew ? '' : d.id}">
+        <label class="f"><span>Name or nickname</span><input class="in" name="name" id="f-dname" required maxlength="80" value="${esc(d.name)}"></label>
+        <label class="f"><span>Table number</span><input class="in" name="table" id="f-dtable" maxlength="20" value="${esc(d.table)}" placeholder="Optional"></label>
+        <label class="f"><span>Wheel</span><select class="in" name="wheel" id="f-dwheel" ${locked ? 'disabled' : ''}><option value="EU" ${d.wheel !== 'US' ? 'selected' : ''}>European (single 0)</option><option value="US" ${d.wheel === 'US' ? 'selected' : ''}>American (0 and 00)</option></select>
+          ${locked ? '<span class="small">Locked because spins are recorded against this wheel.</span>' : ''}</label>
+        <label class="f"><span>Notes</span><textarea class="in" name="notes" id="f-dnotes" maxlength="2000">${esc(d.notes)}</textarea></label>
+        <button class="btn primary block">${isNew ? 'Add dealer' : 'Save changes'}</button>
+        ${isNew ? '' : `<div class="row"><button type="button" class="btn" data-act="archive-dealer">${d.status === 'archived' ? 'Restore from archive' : 'Archive dealer'}</button>
+          <button type="button" class="btn danger" data-act="remove-dealer">Remove…</button></div><div id="confirm-slot"></div>`}
+      </form>`);
+  }
+
+  function spinForm(d, s) {
+    const w = wheelOf(d);
+    openSheet(`<h2>Spin ${pk(s.pocket)}</h2>
+      <form data-form="spin" class="stack" data-id="${s.id}">
+        <div class="grid2">
+          <label class="f"><span>Pocket</span><select class="in" name="pocket" id="f-spocket">${w.pockets.map((p) => `<option value="${p}" ${p === s.pocket ? 'selected' : ''}>${C.label(p)} · ${C.colorOf(p)}</option>`).join('')}</select></label>
+          <label class="f"><span>Spin time</span><input class="in" type="datetime-local" step="1" name="t" id="f-stime" value="${toLocalInput(s.t)}" required></label>
+        </div>
+        <label class="f"><span>Session</span><input class="in" name="session" id="f-ssession" maxlength="60" value="${esc(s.session)}"></label>
+        <label class="f"><span>Notes</span><input class="in" name="notes" id="f-snotes" maxlength="300" value="${esc(s.notes)}"></label>
+        <p class="small muted" style="margin:0">Recorded ${esc(fmtDT(s.rt))}.</p>
+        <button class="btn primary block" ${s.del ? 'disabled' : ''}>Save correction</button>
+        <button type="button" class="btn ${s.del ? '' : 'danger'} block" data-act="${s.del ? 'restore-spin' : 'delete-spin'}" data-id="${s.id}">${s.del ? 'Restore spin' : 'Delete spin'}</button>
+        ${s.log?.length ? `<details><summary>Change log (${s.log.length})</summary><div class="small stack" style="gap:4px;margin-top:6px">${s.log.slice().reverse().map((l) => `<div>${esc(fmtDT(l.at))}: ${l.action ? esc(l.action) : `was ${esc(C.label(l.pocket))} at ${esc(fmtClock(l.t))}${l.session ? ` · ${esc(l.session)}` : ''}`}</div>`).join('')}</div></details>` : ''}
+      </form>`);
+  }
+
+  function bulkForm(d) {
+    const w = wheelOf(d);
+    openSheet(`<h2>Paste past results</h2>
+      <form data-form="bulk" class="stack">
+        <label class="f"><span>Results, separated by spaces, commas or new lines</span><textarea class="in" name="text" id="f-btext" placeholder="17 32 0 5 ${w.size === 38 ? '00 ' : ''}21" required></textarea></label>
+        <label class="f"><span>Order of the list</span><select class="in" name="order" id="f-border"><option value="oldest">Oldest first</option><option value="newest">Newest first</option></select></label>
+        <div class="grid2">
+          <label class="f"><span>Time of the latest spin</span><input class="in" type="datetime-local" step="1" name="end" id="f-bend" value="${toLocalInput(Date.now())}" required></label>
+          <label class="f"><span>Seconds between spins</span><input class="in" type="number" min="1" max="3600" name="gap" id="f-bgap" value="60" required></label>
+        </div>
+        <label class="f"><span>Session</span><input class="in" name="session" id="f-bsession" maxlength="60" value="${esc(prefs.session[d.id] || '')}"></label>
+        <div class="small" id="bulk-preview" aria-live="polite">Paste results to check them.</div>
+        <button class="btn primary block" id="bulk-go" disabled>Record results</button>
+      </form>`, (sheet) => {
+      const upd = () => {
+        const r = parseBulk(sheet.querySelector('#f-btext').value, w);
+        sheet.querySelector('#bulk-preview').innerHTML = !r.tokens ? 'Paste results to check them.'
+          : `<b class="num">${r.valid.length}</b> valid${r.invalid.length ? ` · <span style="color:var(--bad)">not on this wheel: ${r.invalid.slice(0, 12).map(esc).join(', ')}${r.invalid.length > 12 ? '…' : ''}</span>` : ''}`;
+        sheet.querySelector('#bulk-go').disabled = !r.valid.length || r.invalid.length > 0;
+        sheet.querySelector('#bulk-go').textContent = r.invalid.length ? 'Fix invalid results first' : `Record ${r.valid.length} result${r.valid.length === 1 ? '' : 's'}`;
+      };
+      sheet.querySelector('#f-btext').addEventListener('input', upd);
+    });
+  }
+  function parseBulk(text, w) {
+    const toks = String(text).split(/[\s,;]+/).filter(Boolean);
+    const valid = [], invalid = [];
+    for (const t of toks) { const p = C.parsePocket(t, w); p === null ? invalid.push(t) : valid.push(p); }
+    return { tokens: toks.length, valid, invalid };
+  }
+
+  function dataSheet() {
+    const counts = { casinos: Object.keys(S.casinos).length, dealers: Object.keys(S.dealers).length, spins: Object.values(S.ledgers).reduce((a, l) => a + l.spins.length, 0), preds: Object.keys(S.preds).length };
+    const local = store.kind === 'cloud' ? readLocal() : null;
+    const localSpins = local ? Object.values(local.ledgers || {}).reduce((a, l) => a + (l.spins?.length || 0), 0) : 0;
+    const hasSample = Object.values(S.casinos).some((c) => c.sample);
+    openSheet(`<h2>Backup and data</h2>
+      <div class="notice">${store.kind === 'cloud' ? '<strong>Saved to your claude.ai account</strong>Records are private to you and available wherever you open this app signed in.' : (STANDALONE ? '<strong>Saved on this phone</strong>Records stay in this app on this device. Export a backup regularly; deleting the app or clearing its data removes them.' : '<strong>Saved on this device only</strong>Export a backup regularly; clearing browser data removes these records.')}</div>
+      <p class="small num" style="margin:0">${counts.casinos} casinos · ${counts.dealers} dealers · ${counts.spins.toLocaleString()} spins · ${counts.preds} saved estimates</p>
+      <button class="btn primary block" data-act="export">Export backup (.json)</button>
+      <label class="f"><span>Restore or merge a backup</span><input class="in" type="file" accept="application/json,.json" id="import-file"></label>
+      ${local && localSpins ? `<button class="btn block" data-act="adopt-local">Move ${localSpins.toLocaleString()} spins saved on this device into your account</button>` : ''}
+      <div id="export-fallback"></div>
+      <hr style="border:0;border-top:1px solid var(--line);width:100%">
+      <p class="small muted" style="margin:0">Simulated sample data uses a fair random wheel, so it shows what the analytics look like when there is no edge to find.</p>
+      ${hasSample ? '<button class="btn danger block" data-act="clear-sample">Remove sample data</button>' : '<button class="btn block" data-act="sample">Load simulated sample</button>'}
+    `, (sheet) => {
+      sheet.querySelector('#import-file').addEventListener('change', async (e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        try { const n = mergeData(JSON.parse(await f.text())); closeSheet(); render(); toast(`Imported ${n} records.`); }
+        catch { toast('That file is not a backup from this app.'); }
+      });
+    });
+  }
+
+  function exportPayload() { return JSON.stringify({ app: 'roulette-dealer-analytics', version: 1, exportedAt: new Date().toISOString(), ...S }, null, 1); }
+
+  function mergeData(data) {
+    if (!data || typeof data !== 'object' || !data.casinos || !data.dealers) throw new Error('bad');
+    let n = 0;
+    for (const [id, c] of Object.entries(data.casinos)) if (c?.name) { putCasino({ ...c, id }); n++; }
+    for (const [id, d] of Object.entries(data.dealers)) if (d?.casinoId && S.casinos[d.casinoId]) { putDealer({ ...d, id }); n++; }
+    for (const [id, l] of Object.entries(data.ledgers || {})) if (l?.dealerId && S.dealers[l.dealerId] && Array.isArray(l.spins)) { S.ledgers[id] = l; putLedger(id); n += l.spins.length; }
+    for (const [id, p] of Object.entries(data.preds || {})) if (p?.dealerId && S.dealers[p.dealerId] && Array.isArray(p.probs)) { S.preds[id] = p; store.put('preds', id, p); n++; }
+    return n;
+  }
+
+  function loadSample() {
+    const r = C.rng(20261018);
+    const now = Date.now();
+    const plan = [
+      { name: 'Marina Bay Sands (sample)', location: 'Singapore', dealers: [['Dealer A', '12', 420], ['Dealer B', '12', 260], ['Dealer C', '7', 90]] },
+      { name: 'Resorts World Sentosa (sample)', location: 'Sentosa, Singapore', dealers: [['Dealer K', '3', 340], ['Dealer M', '5', 150]] },
+    ];
+    for (const pc of plan) {
+      const c = { id: newId('c'), name: pc.name, location: pc.location, notes: 'Simulated data from a fair random wheel.', meta: {}, wheel: 'EU', status: 'active', createdAt: now, sample: true };
+      putCasino(c);
+      for (const [name, table, n] of pc.dealers) {
+        const d = { id: newId('d'), casinoId: c.id, name, table, notes: 'Simulated', wheel: 'EU', status: 'active', createdAt: now };
+        putDealer(d);
+        const spins = [];
+        let t = now - n * 100e3 - Math.floor(n / 60) * 3 * 36e5 - 6e5 - Math.floor(r() * 36e5); // ends before now
+        for (let i = 0; i < n; i++) {
+          if (i && i % 60 === 0) t += 3 * 36e5; // a break between sessions
+          t += 50e3 + Math.floor(r() * 50e3);
+          const s = makeSpin(d, Math.floor(r() * 37), t, `Session ${1 + Math.floor(i / 60)}`);
+          s.rt = t + 2000;
+          spins.push(s);
+        }
+        addSpins(d, spins);
+      }
+    }
+  }
+
+  // ---------- actions ----------
+  const A = {
+    home: () => go({ name: 'home' }),
+    casino: (el) => go({ name: 'casino', casinoId: el.dataset.id }),
+    dealer: (el) => { hist.limit = 300; go({ name: 'dealer', dealerId: el.dataset.id, tab: 'record' }); },
+    tab: (el) => { V.tab = el.dataset.tab; window.scrollTo(0, 0); render(); savePrefs(); },
+    'toggle-archived': () => { prefs.showArchived = !prefs.showArchived; savePrefs(); render(); },
+    'new-casino': () => casinoForm(null),
+    'edit-casino': () => casinoForm(S.casinos[V.casinoId]),
+    'new-dealer': () => dealerForm(null),
+    'edit-dealer': () => dealerForm(S.dealers[V.dealerId]),
+    'dealer-filter': (el) => { prefs.dealerFilter = el.dataset.f; savePrefs(); render(); },
+    'archive-casino': () => {
+      const c = S.casinos[V.casinoId];
+      putCasino({ ...c, status: c.status === 'archived' ? 'active' : 'archived' });
+      closeSheet(); render(); toast(c.status === 'archived' ? 'Casino restored.' : 'Casino archived. Its history is kept.');
+    },
+    'remove-casino': () => {
+      const c = S.casinos[V.casinoId];
+      $('#confirm-slot').innerHTML = `<div class="notice caution stack"><span>Remove <b>${esc(c.name)}</b> permanently?</span><div class="row"><button type="button" class="btn danger" data-act="remove-casino-yes">Remove</button><button type="button" class="btn" data-act="close">Keep it</button></div></div>`;
+    },
+    'remove-casino-yes': () => {
+      const c = S.casinos[V.casinoId];
+      if (dealersOf(c.id).length) return;
+      delete S.casinos[c.id]; store.del('casinos', c.id);
+      closeSheet(); go({ name: 'home' }); toast(`${c.name} removed.`);
+    },
+    'archive-dealer': () => {
+      const d = S.dealers[V.dealerId];
+      putDealer({ ...d, status: d.status === 'archived' ? 'active' : 'archived' });
+      closeSheet(); render(); toast(d.status === 'archived' ? 'Dealer restored.' : 'Dealer archived. History is kept.');
+    },
+    'remove-dealer': () => {
+      const d = S.dealers[V.dealerId];
+      const n = allSpinsOf(d.id).length;
+      $('#confirm-slot').innerHTML = `<div class="notice caution stack"><span>This deletes <b>${esc(d.name)}</b>, ${n.toLocaleString()} spins and ${predsOf(d.id).length} saved estimates. Archive instead to keep them. Type the dealer name to confirm.</span>
+        <input class="in" id="confirm-name" autocomplete="off" aria-label="Dealer name"><button type="button" class="btn danger" data-act="remove-dealer-yes" id="confirm-go" disabled>Delete dealer and history</button></div>`;
+      $('#confirm-name').addEventListener('input', (e) => { $('#confirm-go').disabled = e.target.value.trim() !== d.name.trim(); });
+      $('#confirm-name').focus();
+    },
+    'remove-dealer-yes': () => {
+      const d = S.dealers[V.dealerId];
+      if ($('#confirm-name')?.value.trim() !== d.name.trim()) return;
+      removeDealer(d.id); closeSheet(); go({ name: 'casino', casinoId: d.casinoId }); toast(`${d.name} removed.`);
+    },
+    close: () => closeSheet(),
+    rec: (el) => {
+      const d = S.dealers[V.dealerId];
+      const p = Number(el.dataset.p);
+      if (C.parsePocket(C.label(p), wheelOf(d)) === null) return;
+      const now = Date.now();
+      if (lastTap.p === p && now - lastTap.at < 700) { toast('Ignored a double tap.'); return; }
+      lastTap = { p, at: now };
+      const s = makeSpin(d, p, customTime ?? now, prefs.session[d.id]);
+      addSpins(d, [s]);
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 250);
+      const strip = $('#strip');
+      if (strip) strip.innerHTML = spinsOf(d.id).slice(-30).reverse().map((x) => pk(x.pocket)).join('');
+      const hcl = $('#hc-line');
+      if (hcl) hcl.innerHTML = hcLine(d);
+      $('#top').innerHTML = renderTop(); setSave(0);
+      toast(`Recorded ${C.label(p)}${customTime ? ` at ${fmtClock(customTime)}` : ''}.`, 'Undo', () => {
+        const f = findSpin(d.id, s.id);
+        if (!f) return;
+        f.l.spins.splice(f.i, 1); putLedger(f.id); render(); toast(`Removed ${C.label(p)}.`);
+      });
+    },
+    'time-now': () => { customTime = null; render(); },
+    bulk: () => bulkForm(S.dealers[V.dealerId]),
+    hsort: (el) => { hist.sort = el.dataset.v; render(); },
+    hmore: () => { hist.limit += 300; render(); },
+    'edit-spin': (el) => { const d = S.dealers[V.dealerId]; const f = findSpin(d.id, el.dataset.id); if (f) spinForm(d, f.s); },
+    'delete-spin': (el) => {
+      const d = S.dealers[V.dealerId]; const f = findSpin(d.id, el.dataset.id);
+      if (!f) return;
+      f.s.del = Date.now(); f.s.log = [...(f.s.log || []), { action: 'deleted', at: Date.now() }]; putLedger(f.id);
+      closeSheet(); render();
+      toast(`Deleted ${C.label(f.s.pocket)}.`, 'Undo', () => A['restore-spin'](el));
+    },
+    'restore-spin': (el) => {
+      const d = S.dealers[V.dealerId]; const f = findSpin(d.id, el.dataset.id);
+      if (!f) return;
+      delete f.s.del; f.s.log = [...(f.s.log || []), { action: 'restored', at: Date.now() }]; putLedger(f.id);
+      closeSheet(); render(); toast('Spin restored.');
+    },
+    swin: (el) => { const v = el.dataset.v; prefs.swin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
+    pwin: (el) => { const v = el.dataset.v; prefs.pwin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
+    sector: (el) => { prefs.sector = el.dataset.v; savePrefs(); render(); },
+    model: (el) => { prefs.model = el.dataset.v; savePrefs(); render(); },
+    'save-pred': () => {
+      const d = S.dealers[V.dealerId], w = wheelOf(d);
+      const win = prefs.pwin[d.id] ?? 100;
+      const all = spinsOf(d.id), sp = C.windowed(all, win);
+      const params = prefs.model === 'smoothed' ? { alpha: prefs.alpha } : {};
+      const p = {
+        id: newId('p'), casinoId: d.casinoId, dealerId: d.id, createdAt: Date.now(),
+        cutoff: all.length ? all[all.length - 1].t : 0, window: win, model: prefs.model, modelVersion: C.MODEL_VERSION[prefs.model], params,
+        wheel: w.type, n: sp.length, from: sp[0]?.t ?? null, to: sp[sp.length - 1]?.t ?? null,
+        probs: C.predict(prefs.model, sp.map((s) => s.pocket), w, params).map((x) => Math.round(x * 1e8) / 1e8),
+      };
+      const pk0 = prefs.model === 'baseline' ? null : C.pick(p.probs, sp.map((s) => s.pocket), w);
+      if (pk0) {
+        const o = betOpt();
+        p.pick = pk0.pocket;
+        p.sector = C.bestSector(p.probs, w, o.k, pk0.pocket, o.mode, C.gaps(sp.map((s) => s.pocket), w)).pockets;
+        p.betType = o.key;
+        p.stake = prefs.stake > 0 ? prefs.stake : 10;
+      }
+      S.preds[p.id] = p; store.put('preds', p.id, p);
+      render(); toast('Estimate saved. It is scored when the next spin is recorded.');
+    },
+    data: () => dataSheet(),
+    export: async () => {
+      const data = exportPayload();
+      const name = `roulette-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      let dl = null;
+      try { dl = await window.claude?.use?.('downloads'); } catch { /* fall through */ }
+      if (dl) {
+        try { await dl.save({ filename: name, data }); return; }
+        catch (e) { if (e?.code === 'declined') return; }
+      }
+      const slot = $('#export-fallback');
+      if (slot) {
+        slot.innerHTML = `<label class="f"><span>Downloads aren't available here. Copy this backup and keep it somewhere safe.</span><textarea class="in mono" id="export-text" readonly style="min-height:140px;font-size:11px">${esc(data)}</textarea></label><button class="btn block" data-act="copy-export">Copy backup</button>`;
+      }
+    },
+    'copy-export': async () => {
+      const ta = $('#export-text');
+      try { await navigator.clipboard.writeText(ta.value); toast('Backup copied.'); }
+      catch { ta.select(); toast('Select-all is ready. Copy it with your keyboard or long-press.'); }
+    },
+    'adopt-local': () => { const n = mergeData(readLocal()); closeSheet(); render(); toast(`Moved ${n} records into your account.`); },
+    sample: () => { loadSample(); closeSheet(); render(); toast('Loaded simulated sample data.'); },
+    'clear-sample': () => {
+      for (const c of Object.values(S.casinos).filter((x) => x.sample)) {
+        for (const d of dealersOf(c.id)) removeDealer(d.id);
+        delete S.casinos[c.id]; store.del('casinos', c.id);
+      }
+      closeSheet(); go({ name: 'home' }); toast('Sample data removed.');
+    },
+  };
+
+  const F = {
+    casino(form) {
+      const fd = new FormData(form);
+      const name = String(fd.get('name')).trim();
+      if (!name) return;
+      const meta = {};
+      for (const line of String(fd.get('meta') || '').split('\n')) {
+        const i = line.indexOf(':');
+        if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+      }
+      const id = form.dataset.id;
+      const base = id ? S.casinos[id] : { id: newId('c'), status: 'active', createdAt: Date.now() };
+      const c = { ...base, name, location: String(fd.get('location')).trim(), wheel: fd.get('wheel') === 'US' ? 'US' : 'EU', notes: String(fd.get('notes')).trim(), meta };
+      putCasino(c);
+      closeSheet();
+      if (id) { render(); toast('Casino saved.'); } else go({ name: 'casino', casinoId: c.id });
+    },
+    dealer(form) {
+      const fd = new FormData(form);
+      const name = String(fd.get('name')).trim();
+      if (!name) return;
+      const id = form.dataset.id;
+      const base = id ? S.dealers[id] : { id: newId('d'), casinoId: V.casinoId, status: 'active', createdAt: Date.now() };
+      const locked = id && allSpinsOf(id).length > 0;
+      const d = { ...base, name, table: String(fd.get('table')).trim(), notes: String(fd.get('notes')).trim(), wheel: locked ? base.wheel : fd.get('wheel') === 'US' ? 'US' : 'EU' };
+      putDealer(d);
+      closeSheet();
+      if (id) { render(); toast('Dealer saved.'); } else go({ name: 'dealer', dealerId: d.id, tab: 'record' });
+    },
+    spin(form) {
+      const d = S.dealers[V.dealerId];
+      const f = findSpin(d.id, form.dataset.id);
+      if (!f) return;
+      const fd = new FormData(form);
+      const pocket = Number(fd.get('pocket'));
+      const t = fromLocalInput(fd.get('t'));
+      if (t === null || pocket < 0 || pocket >= wheelOf(d).size) { toast('Enter a valid pocket and time.'); return; }
+      const next = { pocket, t, session: String(fd.get('session')).trim(), notes: String(fd.get('notes')).trim() };
+      const s = f.s;
+      if (next.pocket === s.pocket && next.t === s.t && next.session === s.session && next.notes === s.notes) { closeSheet(); return; }
+      s.log = [...(s.log || []), { pocket: s.pocket, t: s.t, session: s.session, notes: s.notes, at: Date.now() }];
+      Object.assign(s, next);
+      putLedger(f.id);
+      closeSheet(); render(); toast('Spin corrected. Statistics updated.');
+    },
+    bulk(form) {
+      const d = S.dealers[V.dealerId];
+      const fd = new FormData(form);
+      const r = parseBulk(fd.get('text'), wheelOf(d));
+      const end = fromLocalInput(fd.get('end'));
+      const gap = Math.max(1, Number(fd.get('gap')) || 60) * 1000;
+      if (!r.valid.length || r.invalid.length || end === null) return;
+      const list = fd.get('order') === 'newest' ? r.valid.slice().reverse() : r.valid;
+      const session = String(fd.get('session')).trim();
+      const spins = list.map((p, i) => makeSpin(d, p, end - (list.length - 1 - i) * gap, session));
+      addSpins(d, spins);
+      closeSheet(); render(); toast(`Recorded ${spins.length} past results.`);
+    },
+  };
+
+  // ---------- events ----------
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-act]');
+    if (t && !t.disabled) { hideTip(); A[t.dataset.act]?.(t, e); return; }
+    const tipT = e.target.closest('[data-tip]');
+    if (tipT) showTip(tipT); else hideTip();
+  });
+  document.addEventListener('pointerover', (e) => { if (e.pointerType !== 'mouse') return; const t = e.target.closest('[data-tip]'); t ? showTip(t) : hideTip(); });
+  document.addEventListener('focusin', (e) => { const t = e.target.closest?.('[data-tip]'); if (t) showTip(t); });
+  window.addEventListener('scroll', hideTip, { passive: true });
+  document.addEventListener('submit', (e) => { e.preventDefault(); F[e.target.dataset.form]?.(e.target); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSheet(); hideTip(); } });
+  document.addEventListener('input', (e) => {
+    const id = e.target.id;
+    if (id === 'dealer-search') { prefs.dealerQuery = e.target.value; $('#dealer-list').innerHTML = dealerListHtml(S.casinos[V.casinoId]); }
+    else if (id === 'rec-session') { prefs.session[V.dealerId] = e.target.value; savePrefs(); }
+    else if (id === 'alpha') { $('#alpha-v').textContent = e.target.value; }
+  });
+  document.addEventListener('change', (e) => {
+    const id = e.target.id;
+    if (id === 'rec-time') { customTime = e.target.value ? fromLocalInput(e.target.value) : null; render(); }
+    else if (id === 'alpha') { prefs.alpha = Number(e.target.value); savePrefs(); render(); }
+    else if (id === 'stake') { const v = Number(e.target.value); if (v > 0) { prefs.stake = v; savePrefs(); } render(); }
+    else if (id === 'h-from') { hist.from = e.target.value; render(); }
+    else if (id === 'h-to') { hist.to = e.target.value; render(); }
+    else if (id === 'h-session') { hist.session = e.target.value; render(); }
+    else if (id === 'h-del') { hist.showDel = e.target.checked; render(); }
+  });
+
+  // ---------- boot ----------
+  async function boot() {
+    render();
+    let adapter = null, data = null;
+    try {
+      const cl = window.claude;
+      if (cl?.use) {
+        const [db, user] = await Promise.all([cl.use('db'), cl.use('user')]);
+        const uid = user ? await user.id() : null;
+        if (db && uid) { adapter = CloudStore(db, uid); data = await adapter.load(); }
+      }
+    } catch { adapter = null; }
+    if (!adapter) {
+      adapter = LocalStore(); data = await adapter.load();
+      try { await navigator.storage?.persist?.(); } catch { /* best effort: ask the browser not to evict records */ }
+    }
+    store = adapter;
+    for (const k of Object.keys(S)) S[k] = (data && data[k]) || {};
+    ready = true;
+    V = validView(prefs.view || { name: 'home' });
+    render();
+  }
+  boot();
+})();
+
+</script>
