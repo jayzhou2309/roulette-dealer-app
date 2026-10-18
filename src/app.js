@@ -31,6 +31,7 @@
     record: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 3v18M15 3v18M4 9h16M4 15h16"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r=".8"/><circle cx="3.5" cy="12" r=".8"/><circle cx="3.5" cy="18" r=".8"/></svg>',
     stats: '<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+    undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     predict: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>',
   };
 
@@ -161,6 +162,12 @@
   function findSpin(did, sid) {
     for (const [id, l] of ledgersOf(did)) { const i = l.spins.findIndex((s) => s.id === sid); if (i >= 0) return { id, l, i, s: l.spins[i] }; }
     return null;
+  }
+  // The spin entered most recently (by record time, not spin time), so a back-dated mistake is still the one undone.
+  function lastRecorded(did) {
+    let last = null;
+    for (const s of allSpinsOf(did)) if (!s.del && (!last || s.rt >= last.rt)) last = s;
+    return last;
   }
   function makeSpin(d, pocket, t, session) {
     return { id: newId('s'), casinoId: d.casinoId, dealerId: d.id, pocket, t, rt: Date.now(), session: session || '', notes: '', log: [] };
@@ -330,7 +337,9 @@
     const key = (p) => `<button class="key ${C.colorOf(p)}" data-act="rec" data-p="${p}" aria-label="Record ${C.label(p)}">${C.label(p)}</button>`;
     const rows = [];
     for (let n = 1; n <= 36; n++) rows.push(key(n));
-    return `<section class="card stack"><div class="spread"><span class="eyebrow">Last spins · newest first</span><span class="small muted num">${spinsOf(d.id).length} total</span></div>
+    const n = spinsOf(d.id).length;
+    return `<section class="card stack"><div class="spread"><span class="row"><span class="eyebrow">Last spins</span><span class="small muted num" id="rec-total">${n} total</span></span>
+          <button class="btn undo-btn" data-act="undo-last" id="undo-last" ${n ? '' : 'disabled'} aria-label="Undo the last recorded spin">${ICON.undo}Undo last</button></div>
         <div class="strip" id="strip">${recent.length ? recent.map((s) => pk(s.pocket)).join('') : '<span class="muted small">No spins yet. Tap the winning pocket below.</span>'}</div>
         <div id="hc-line">${hcLine(d)}</div></section>
       <section class="card stack">
@@ -342,6 +351,20 @@
         <div class="keypad" role="group" aria-label="${esc(w.name)} layout"><div class="zeros">${key(0)}${w.size === 38 ? key(C.DOUBLE_ZERO) : ''}</div>${rows.join('')}</div>
         <div class="row"><button class="btn" data-act="bulk">Paste past results</button><span class="small muted">${esc(w.name)}</span></div>
       </section>`;
+  }
+
+  // Refresh the Record tab in place after a tap, so the keypad keeps its scroll position.
+  function refreshRecord(d) {
+    const strip = $('#strip');
+    if (strip) strip.innerHTML = spinsOf(d.id).slice(-30).reverse().map((x) => pk(x.pocket)).join('') || '<span class="muted small">No spins yet. Tap the winning pocket below.</span>';
+    const hcl = $('#hc-line');
+    if (hcl) hcl.innerHTML = hcLine(d);
+    const n = spinsOf(d.id).length;
+    const tot = $('#rec-total');
+    if (tot) tot.textContent = `${n} total`;
+    const undo = $('#undo-last');
+    if (undo) undo.disabled = !n;
+    $('#top').innerHTML = renderTop(); setSave(0);
   }
 
   // ----- history -----
@@ -985,15 +1008,26 @@
       addSpins(d, [s]);
       el.classList.add('flash');
       setTimeout(() => el.classList.remove('flash'), 250);
-      const strip = $('#strip');
-      if (strip) strip.innerHTML = spinsOf(d.id).slice(-30).reverse().map((x) => pk(x.pocket)).join('');
-      const hcl = $('#hc-line');
-      if (hcl) hcl.innerHTML = hcLine(d);
-      $('#top').innerHTML = renderTop(); setSave(0);
+      refreshRecord(d);
       toast(`Recorded ${C.label(p)}${customTime ? ` at ${fmtClock(customTime)}` : ''}.`, 'Undo', () => {
         const f = findSpin(d.id, s.id);
         if (!f) return;
         f.l.spins.splice(f.i, 1); putLedger(f.id); render(); toast(`Removed ${C.label(p)}.`);
+      });
+    },
+    'undo-last': () => {
+      const d = S.dealers[V.dealerId];
+      const last = lastRecorded(d.id);
+      const f = last && findSpin(d.id, last.id);
+      if (!f) return;
+      f.s.del = Date.now(); f.s.log = [...(f.s.log || []), { action: 'deleted', at: Date.now() }]; putLedger(f.id);
+      lastTap = { p: null, at: 0 }; // re-entering the same number right away is a correction, not a double tap
+      refreshRecord(d);
+      toast(`Removed ${C.label(f.s.pocket)}.`, 'Restore', () => {
+        const g = findSpin(d.id, f.s.id);
+        if (!g) return;
+        delete g.s.del; g.s.log = [...(g.s.log || []), { action: 'restored', at: Date.now() }]; putLedger(g.id);
+        render(); toast(`Restored ${C.label(g.s.pocket)}.`);
       });
     },
     'time-now': () => { customTime = null; render(); },

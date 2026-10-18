@@ -35,6 +35,16 @@ for (const scheme of ['light', 'dark']) {
     const strip = await page.$$eval('#strip .pk', (els) => els.map((e) => e.textContent));
     console.log('strip', strip.join(' '));
     if (strip.join(' ') !== '5 17 32 0 17') throw new Error('strip mismatch');
+    // undo a wrong entry, then enter the right one
+    await page.click('.key[data-p="8"]');
+    await page.click('#undo-last');
+    await page.waitForSelector('text=Removed 8');
+    const undone = await page.$$eval('#strip .pk', (els) => els.map((e) => e.textContent).join(' '));
+    console.log('after undo', undone);
+    if (undone !== '5 17 32 0 17') throw new Error('undo mismatch');
+    await page.click('.key[data-p="8"]');
+    await page.click('#undo-last');
+    await page.waitForTimeout(750);
     // bulk paste
     await page.click('text=Paste past results');
     await page.fill('#f-btext', Array.from({ length: 120 }, (_, i) => (i * 7) % 37).join(' ') + ' 40');

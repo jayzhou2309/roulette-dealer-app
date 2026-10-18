@@ -90,6 +90,8 @@ main { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-i
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.danger { color: var(--bad); }
 .btn.block { width: 100%; }
+.undo-btn { flex: none; min-height: 36px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; }
+.undo-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; min-height: 34px; font-size: 13.5px; }
