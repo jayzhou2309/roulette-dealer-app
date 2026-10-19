@@ -466,79 +466,69 @@ const Core = (() => {
     return { n, expected: e, hot, cold };
   }
 
-  // ----- standard betting strategies -----
-  // Outside bets a progression can follow, with their payout (to 1).
-  const TARGETS = GROUPS.flatMap((g) => g.items.filter((i) => i.k !== 'green').map((i) => ({ ...i, pays: g.key === 'dozen' || g.key === 'column' ? 2 : 1 })));
-  const STRATEGIES = [
-    { id: 'flat', name: 'Flat bet', desc: 'The same one-unit stake every spin.' },
-    { id: 'martingale', name: 'Martingale', desc: 'Double the stake after a loss; back to one unit after a win.' },
-    { id: 'paroli', name: 'Paroli (reverse Martingale)', desc: 'Double the stake after a win, up to three wins in a row; back to one unit after a loss or the third win.' },
-    { id: 'dalembert', name: "D'Alembert", desc: 'One unit more after a loss, one unit less after a win.' },
-    { id: 'fibonacci', name: 'Fibonacci', desc: 'Move one step along 1, 1, 2, 3, 5, 8… after a loss; two steps back after a win.' },
-    { id: 'labouchere', name: 'Labouchère', desc: 'Start with the line 1-2-3-4 and stake first + last. A win crosses both off, a loss adds the stake to the end; a finished line starts again.' },
-    { id: 'jamesbond', name: 'James Bond', desc: '20 units every spin: 14 on 19–36, 5 on the 13–18 six line, 1 on zero. Ignores the chosen bet.' },
+  // ----- standard bet-placement systems -----
+  // Outside bets on the layout, by key (red, black, odd, even, low, high, d1–d3, c1–c3).
+  const OUTSIDE = Object.fromEntries(GROUPS.flatMap((g) => g.items.filter((i) => i.k !== 'green')
+    .map((i) => [i.k, { key: i.k, label: i.label, pockets: Array.from({ length: 36 }, (_, j) => j + 1).filter(i.test) }])));
+  const out = (key, chips) => ({ kind: 'outside', key, pockets: OUTSIDE[key].pockets, chips });
+  const ins = (kind, pockets, chips = 1) => ({ kind, pockets, chips });
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+  // Fixed chip spreads, flat-staked every spin. `eu` = a European announced bet (follows the single-zero wheel order).
+  const PLACEMENTS = [
+    { id: 'red', name: 'Red only', desc: 'One chip on red. The simplest even-money bet, for comparison.', bets: [out('red', 1)] },
+    { id: 'twodozens', name: 'Two dozens', desc: 'One chip each on the 1st and 2nd dozen. Covers 24 numbers; a hit wins one chip.', bets: [out('d1', 1), out('d2', 1)] },
+    { id: 'threetwo', name: '3/2 system', desc: 'Three chips on red and two on the 2nd column, which is mostly black.', bets: [out('red', 3), out('c2', 2)] },
+    { id: 'jamesbond', name: 'James Bond', desc: '14 chips on 19–36, 5 on the 13–18 six line and 1 on zero. Every hit wins; 1–12 loses all 20.',
+      bets: [out('high', 14), ins('six line', range(13, 18), 5), ins('straight', [0], 1)] },
+    { id: 'romanosky', name: 'Romanosky', desc: 'Three chips each on the 1st and 2nd dozen, one each on the 25–29 and 32–36 corners. Covers 32 numbers.',
+      bets: [out('d1', 3), out('d2', 3), ins('corner', [25, 26, 28, 29]), ins('corner', [32, 33, 35, 36])] },
+    { id: 'voisins', eu: true, name: 'Voisins du Zéro', desc: 'The 17 numbers around zero on the wheel: 2 chips on 0-2-3, 2 on the 25–29 corner and splits 4/7, 12/15, 18/21, 19/22, 32/35. 9 chips.',
+      bets: [ins('trio', [0, 2, 3], 2), ins('split', [4, 7]), ins('split', [12, 15]), ins('split', [18, 21]), ins('split', [19, 22]), ins('corner', [25, 26, 28, 29], 2), ins('split', [32, 35])] },
+    { id: 'tiers', eu: true, name: 'Tiers du Cylindre', desc: 'The 12 numbers opposite zero on the wheel, as six splits: 5/8, 10/11, 13/16, 23/24, 27/30, 33/36.',
+      bets: [[5, 8], [10, 11], [13, 16], [23, 24], [27, 30], [33, 36]].map((ps) => ins('split', ps)) },
+    { id: 'orphelins', eu: true, name: 'Orphelins', desc: 'The 8 numbers left over by Voisins and Tiers: 1 straight up and splits 6/9, 14/17, 17/20, 31/34. 5 chips.',
+      bets: [ins('straight', [1]), ins('split', [6, 9]), ins('split', [14, 17]), ins('split', [17, 20]), ins('split', [31, 34])] },
+    { id: 'jeuzero', eu: true, name: 'Jeu Zéro', desc: 'The 7 numbers closest to zero: splits 0/3, 12/15, 32/35 and 26 straight up. 4 chips.',
+      bets: [ins('split', [0, 3]), ins('split', [12, 15]), ins('straight', [26]), ins('split', [32, 35])] },
   ];
-  const FIB = [1, 1];
-  const fib = (i) => { while (FIB.length <= i) FIB.push(FIB[FIB.length - 1] + FIB[FIB.length - 2]); return FIB[i]; };
+  const placementsFor = (w) => PLACEMENTS.filter((s) => !s.eu || w.size === 37);
 
-  // Replays `pockets` in order with a progression, in units of one chip.
-  // A stake above the table limit or the money left resets the progression to one unit (capHits);
-  // the run stops when the bankroll can't cover the smallest stake.
-  function simulateStrategy(pockets, id, opts = {}) {
-    const bankroll = opts.bankroll ?? 100, tableMax = opts.tableMax ?? 100;
-    const target = TARGETS.find((t) => t.k === (opts.target || 'red'));
-    let bank = bankroll, peak = bankroll, maxDD = 0, won = 0, lost = 0, wins = 0, losses = 0, wagered = 0, largest = 0, capHits = 0, bustAt = null;
-    let step = 1, run = 0, line = [1, 2, 3, 4];
-    const path = [bank];
-    const reset = () => { step = id === 'fibonacci' ? 0 : 1; run = 0; line = [1, 2, 3, 4]; };
-    reset();
-    const want = () => (id === 'fibonacci' ? fib(step) : id === 'labouchere' ? (line.length > 1 ? line[0] + line[line.length - 1] : line[0]) : id === 'flat' ? 1 : step);
-    for (let i = 0; i < pockets.length; i++) {
-      const y = pockets[i];
-      let stake, result;
-      if (id === 'jamesbond') {
-        stake = 20;
-        if (bank < stake) { bustAt = i; break; }
-        result = y >= 19 && y <= 36 ? 8 : y >= 13 && y <= 18 ? 10 : y === 0 ? 16 : -20;
-      } else {
-        stake = want();
-        if (stake > Math.min(tableMax, bank)) { capHits++; reset(); stake = 1; }
-        if (bank < stake) { bustAt = i; break; }
-        const hit = target.test(y);
-        result = hit ? stake * target.pays : -stake;
-        if (id === 'martingale') step = hit ? 1 : step * 2;
-        else if (id === 'paroli') { if (hit && run < 2) { run++; step *= 2; } else reset(); }
-        else if (id === 'dalembert') step = Math.max(1, step + (hit ? -1 : 1));
-        else if (id === 'fibonacci') step = hit ? Math.max(0, step - 2) : step + 1;
-        else if (id === 'labouchere') {
-          if (hit) { line = line.slice(1, -1); if (!line.length) line = [1, 2, 3, 4]; } else line.push(stake);
-        }
-      }
-      wagered += stake; largest = Math.max(largest, stake);
-      if (result > 0) { won += result; wins++; } else if (result < 0) { lost -= result; losses++; }
-      bank += result; peak = Math.max(peak, bank); maxDD = Math.max(maxDD, peak - bank);
-      path.push(bank);
-    }
-    return {
-      id, played: path.length - 1, wins, losses, net: bank - bankroll, bank, won, lost, wagered, largest, capHits, bustAt, maxDD, path,
-      pf: lost > 0 ? won / lost : won > 0 ? Infinity : NaN,
-    };
+  // Net result in chips for every pocket: each bet pays 36/n − 1 to 1 on its n numbers.
+  function placementNet(sys, w) {
+    const cost = sys.bets.reduce((a, b) => a + b.chips, 0);
+    const net = new Array(w.size).fill(-cost);
+    for (const b of sys.bets) for (const p of b.pockets) net[p] += b.chips * (36 / b.pockets.length);
+    return { cost, net, covered: net.filter((x, p) => sys.bets.some((b) => b.pockets.includes(p))).length,
+      // long-run profit factor on a fair wheel: winning pockets' total over losing pockets' total
+      fairPf: net.filter((x) => x > 0).reduce((a, x) => a + x, 0) / -net.filter((x) => x < 0).reduce((a, x) => a + x, 0) };
   }
 
-  // Same strategy on `sims` random fair-wheel sequences of the same length, for comparison.
-  function strategyBenchmark(n, w, id, opts = {}, sims = 200, seed = 7) {
-    const r = rng(seed), pfs = [], nets = [];
+  // Replays `pockets` with a fixed spread; stops when the bankroll (chips) can't cover a spin.
+  function simulatePlacement(pockets, pn, bankroll = Infinity) {
+    let bank = 0, peak = 0, maxDD = 0, won = 0, lost = 0, wins = 0, losses = 0, pushes = 0, bustAt = null;
+    const path = [0];
+    for (let i = 0; i < pockets.length; i++) {
+      if (bankroll + bank < pn.cost) { bustAt = i; break; }
+      const r = pn.net[pockets[i]];
+      if (r > 0) { won += r; wins++; } else if (r < 0) { lost -= r; losses++; } else pushes++;
+      bank += r; peak = Math.max(peak, bank); maxDD = Math.max(maxDD, peak - bank);
+      path.push(bank);
+    }
+    const played = path.length - 1;
+    return { played, wins, losses, pushes, net: bank, won, lost, wagered: played * pn.cost, maxDD, bustAt, path,
+      pf: lost > 0 ? won / lost : won > 0 ? Infinity : NaN };
+  }
+
+  // Same spread on `sims` seeded random fair-wheel sequences of the same length.
+  function placementBenchmark(n, w, pn, bankroll = Infinity, sims = 200, seed = 7) {
+    const r = rng(seed), nets = [];
     let busts = 0;
     for (let k = 0; k < sims; k++) {
-      const ps = Array.from({ length: n }, () => Math.floor(r() * w.size));
-      const res = simulateStrategy(ps, id, opts);
-      if (!Number.isNaN(res.pf)) pfs.push(res.pf);
+      const res = simulatePlacement(Array.from({ length: n }, () => Math.floor(r() * w.size)), pn, bankroll);
       nets.push(res.net);
       if (res.bustAt !== null) busts++;
     }
-    pfs.sort((a, b) => a - b); nets.sort((a, b) => a - b);
-    const med = (a) => (a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : NaN);
-    return { sims, pfMedian: med(pfs), netMedian: med(nets), nets, profitable: nets.filter((x) => x > 0).length / sims, bustRate: busts / sims };
+    return { sims, nets, profitable: nets.filter((x) => x > 0).length / sims, bustRate: busts / sims };
   }
 
   // Seeded generator for clearly-labelled simulated sample data.
@@ -552,7 +542,7 @@ const Core = (() => {
     wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
     categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
     predict, logLoss, brier, backtest, evaluate, mean, rng, weightedCounts, DEFAULT_HALF_LIFE,
-    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, TARGETS, STRATEGIES, simulateStrategy, strategyBenchmark, pickBacktest, hotCold,
+    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, OUTSIDE, PLACEMENTS, placementsFor, placementNet, simulatePlacement, placementBenchmark, pickBacktest, hotCold,
   };
 })();
 

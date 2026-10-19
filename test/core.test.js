@@ -319,29 +319,38 @@ test('betPlacement covers exactly the numbers with the fewest inside bets', () =
   }
 });
 
-test('strategy replay: progressions and profit factor', () => {
-  const ps = [1, 2, 3, 4, 5, 0, 7, 9, 12, 14]; // red: 1 3 5 7 9 12 14
-  const flat = C.simulateStrategy(ps, 'flat', { target: 'red' });
-  assert.equal(flat.net, 4);
-  assert.equal(flat.wins, 7);
-  close(flat.pf, 7 / 3);
-  const paroli = C.simulateStrategy(ps, 'paroli', { target: 'red' });
-  assert.deepEqual(paroli.path, [100, 101, 99, 100, 98, 99, 97, 98, 100, 104, 105]);
-  const mart = C.simulateStrategy([2, 4, 6, 1], 'martingale', { target: 'red' });
-  assert.deepEqual(mart.path, [100, 99, 97, 93, 101]);
-  // table limit resets the progression to one unit
-  const capped = C.simulateStrategy([2, 4, 6, 1], 'martingale', { target: 'red', tableMax: 3 });
-  assert.equal(capped.capHits, 1);
-  assert.equal(capped.largest, 2);
-  // dozens pay 2 to 1
-  assert.equal(C.simulateStrategy([13, 1], 'flat', { target: 'd2' }).net, 1);
-  // James Bond: 19-36 +8, 13-18 +10, zero +16, else -20; stops when 20 units aren't left
-  assert.deepEqual(C.simulateStrategy([20, 15, 0, 5], 'jamesbond').path, [100, 108, 118, 134, 114]);
-  const bust = C.simulateStrategy([1, 1, 1, 1, 1, 1], 'jamesbond', { bankroll: 50 });
+test('placement systems: payouts, coverage and replay', () => {
+  const sys = (id) => C.PLACEMENTS.find((s) => s.id === id);
+  // every spread loses the house edge per chip on a fair wheel
+  for (const w of [EU, US]) for (const s of C.placementsFor(w)) {
+    const pn = C.placementNet(s, w);
+    close(pn.net.reduce((a, x) => a + x, 0) / w.size, -pn.cost * (w.size - 36) / w.size);
+  }
+  assert.deepEqual(C.placementsFor(US).map((s) => s.id), ['red', 'twodozens', 'threetwo', 'jamesbond', 'romanosky']);
+  const jb = C.placementNet(sys('jamesbond'), EU);
+  assert.equal(jb.cost, 20);
+  assert.deepEqual([jb.net[20], jb.net[15], jb.net[0], jb.net[5]], [8, 10, 16, -20]);
+  assert.equal(jb.covered, 25);
+  const v = C.placementNet(sys('voisins'), EU);
+  assert.equal(v.cost, 9);
+  assert.equal(v.covered, 17);
+  assert.deepEqual([v.net[0], v.net[26], v.net[4], v.net[1]], [15, 9, 9, -9]);
+  assert.equal(C.placementNet(sys('tiers'), EU).covered, 12);
+  const o = C.placementNet(sys('orphelins'), EU);
+  assert.deepEqual([o.covered, o.net[17], o.net[1]], [8, 31, 31]);
+  assert.equal(C.placementNet(sys('jeuzero'), EU).covered, 7);
+  const ro = C.placementNet(sys('romanosky'), EU);
+  assert.deepEqual([ro.covered, ro.net[5], ro.net[26], ro.net[27]], [32, 1, 1, -8]);
+  const tt = C.placementNet(sys('threetwo'), EU);
+  assert.deepEqual([tt.net[1], tt.net[2], tt.net[5], tt.net[3], tt.net[0]], [1, 1, 7, 1, -5]);
+  close(C.placementNet(sys('red'), EU).fairPf, 18 / 19);
+  // replay
+  const r = C.simulatePlacement([20, 15, 0, 5], jb);
+  assert.deepEqual(r.path, [0, 8, 18, 34, 14]);
+  close(r.pf, 34 / 20);
+  const bust = C.simulatePlacement([1, 1, 1, 1], jb, 50);
   assert.equal(bust.bustAt, 2);
-  assert.ok(Number.isNaN(C.simulateStrategy([], 'flat').pf));
-  assert.equal(C.simulateStrategy([1], 'flat').pf, Infinity);
-  // fair-wheel flat even-money bet: profit factor near 18/19
-  const b = C.strategyBenchmark(2000, EU, 'flat', { target: 'red', bankroll: 1e6 }, 100);
-  assert.ok(Math.abs(b.pfMedian - 18 / 19) < 0.03, String(b.pfMedian));
+  assert.ok(Number.isNaN(C.simulatePlacement([], jb).pf));
+  const bm = C.placementBenchmark(500, EU, jb, Infinity, 50);
+  assert.equal(bm.nets.length, 50);
 });

@@ -48,7 +48,7 @@
   let lastTap = { p: null, at: 0 };
 
   function loadPrefs() {
-    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'weighted', alpha: 5, halfLife: 50, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10, twin: {}, stratTarget: 'red', bankroll: 100, tableMax: 100 };
+    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'weighted', alpha: 5, halfLife: 50, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10, twin: {}, bankroll: 0 };
     try { return Object.assign(d, JSON.parse(localStorage.getItem('rda.prefs') || '{}')); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem('rda.prefs', JSON.stringify({ ...prefs, view: V })); } catch { /* convenience only */ } }
@@ -577,8 +577,26 @@
 
   // Betting-table layout (zero column, then 12 columns of 3) with the sector lit and chips placed.
   const CHIP_TAGS = 'ABCDEFGHIJKL';
-  function tableMini(w, sector, pickP, place) {
-    const Z = 30, CW = 26, RH = 30, H = 3 * RH, on = new Set(sector.pockets), us = w.size === 38;
+  // opts.full adds the outside bets (dozens, even-money boxes, columns); opts.tag labels each chip.
+  function tableMini(w, sector, pickP, place, opts = {}) {
+    const Z = 30, CW = 26, RH = 30, H = 3 * RH, OH = 24, on = new Set(sector.pockets), us = w.size === 38, full = !!opts.full;
+    const tag = opts.tag || ((b, i) => CHIP_TAGS[i]);
+    const X1 = Z + 12 * CW;
+    // Outside boxes: columns to the right of each row, dozens under the numbers, then the even-money row.
+    const EVEN_ROW = ['low', 'even', 'red', 'black', 'odd', 'high'];
+    const obox = (k) => {
+      if (/^c\d$/.test(k)) return [X1, (3 - Number(k[1])) * RH, CW, RH];
+      if (/^d\d$/.test(k)) return [Z + (Number(k[1]) - 1) * 4 * CW, H, 4 * CW, OH];
+      return [Z + EVEN_ROW.indexOf(k) * 2 * CW, H + OH, 2 * CW, OH];
+    };
+    const usedOut = new Set(place.filter((b) => b.kind === 'outside').map((b) => b.key));
+    const OLABEL = { low: '1–18', even: 'EVEN', red: '◆', black: '◆', odd: 'ODD', high: '19–36', d1: '1st 12', d2: '2nd 12', d3: '3rd 12', c1: '2:1', c2: '2:1', c3: '2:1' };
+    const outside = full ? Object.keys(OLABEL).map((k) => {
+      const [x, y, bw, bh] = obox(k), lit = usedOut.has(k);
+      const ink = k === 'red' ? 'var(--pocket-red)' : k === 'black' ? 'var(--fg)' : 'var(--muted)';
+      return `<g opacity="${lit ? 1 : 0.55}"><rect x="${x + 1}" y="${y + 1}" width="${bw - 2}" height="${bh - 2}" rx="3" fill="var(--surface-2)" stroke="${lit ? 'var(--accent)' : 'var(--line)'}" stroke-width="${lit ? 1.5 : 1}"/>
+        <text x="${x + bw / 2 - (lit && bw > CW ? 8 : 0)}" y="${y + bh / 2}" text-anchor="middle" dominant-baseline="central" fill="${ink}" font-size="${k === 'red' || k === 'black' ? 14 : 10.5}" font-weight="600" font-family="var(--f-body)">${OLABEL[k]}</text></g>`;
+    }).join('') : '';
     const box = (p) => {
       if (p === 0) return us ? [0, H / 2, Z, H / 2] : [0, 0, Z, H];
       if (p === C.DOUBLE_ZERO) return [0, 0, Z, H / 2];
@@ -595,6 +613,7 @@
     // Where the dealer expects each chip: on the shared line, corner or outer edge of its numbers.
     const spot = (b) => {
       const ps = b.pockets;
+      if (b.kind === 'outside') { const [x, y, bw, bh] = obox(b.key); return [bw > CW ? x + bw - 12 : x + bw / 2, y + bh / 2]; }
       if (ps.includes(0) || ps.includes(C.DOUBLE_ZERO)) {
         const nums = ps.filter((p) => !C.isZero(p));
         if (!nums.length) return [Z / 2, H / 2];
@@ -609,10 +628,10 @@
     const chips = place.map((b, i) => {
       const [x, y] = spot(b), r = b.kind === 'straight' ? 7.5 : 8.5;
       return `<g><circle cx="${x}" cy="${y}" r="${r}" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><circle cx="${x}" cy="${y}" r="${r - 3}" fill="none" stroke="var(--surface)" stroke-width="1" stroke-dasharray="2 1.6" opacity=".8"/>
-        <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" fill="var(--surface)" font-size="${r > 8 ? 9 : 8}" font-weight="700" font-family="var(--f-body)">${CHIP_TAGS[i]}</text></g>`;
+        <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" fill="var(--surface)" font-size="${r > 8 ? 9 : 8}" font-weight="700" font-family="var(--f-body)">${tag(b, i)}</text></g>`;
     }).join('');
-    return `<div class="tbl-wrap"><svg class="tmini" viewBox="-2 -2 ${Z + 12 * CW + 4} ${H + 13}" role="img" aria-label="Betting table with the suggested numbers lit and ${place.length} chip placement${place.length === 1 ? '' : 's'} marked">
-      ${w.pockets.map(cell).join('')}${chips}</svg></div>`;
+    return `<div class="tbl-wrap"><svg class="tmini" viewBox="-2 -2 ${(full ? X1 + CW : X1) + 4} ${(full ? H + 2 * OH : H + 9) + 4}" role="img" aria-label="${esc(opts.label || `Betting table with the suggested numbers lit and ${place.length} chip placement${place.length === 1 ? '' : 's'} marked`)}">
+      ${w.pockets.map(cell).join('')}${outside}${chips}</svg></div>`;
   }
 
   function renderPick(d, w, probs, pockets, win, all) {
@@ -694,7 +713,7 @@
   }
 
   // ----- strategies -----
-  // Bankroll over the replay: one line against the starting bankroll, with hover bands for readouts.
+  // Running result over the replay: one line against the start level, with hover bands for readouts.
   function bankrollSpark(path, start, stake, bustAt) {
     const W = 300, H = 64, n = path.length - 1, lo = Math.min(0, ...path), hi = Math.max(start * 1.05, ...path);
     const x = (i) => (n ? (i / n) * W : 0), y = (v) => H - 4 - ((v - lo) / (hi - lo || 1)) * (H - 8);
@@ -702,74 +721,78 @@
     const bands = Math.min(n, 60), hit = [];
     for (let b = 0; b < bands; b++) {
       const i = Math.round(((b + 1) / bands) * n);
-      hit.push(`<rect x="${x(Math.round((b / bands) * n)).toFixed(1)}" y="0" width="${(W / bands).toFixed(1)}" height="${H}" fill="transparent" data-tip="After spin ${i}: bankroll ${money(path[i] * stake, false)} (${money((path[i] - start) * stake)})"/>`);
+      hit.push(`<rect x="${x(Math.round((b / bands) * n)).toFixed(1)}" y="0" width="${(W / bands).toFixed(1)}" height="${H}" fill="transparent" data-tip="After spin ${i}: ${money((path[i] - start) * stake)}"/>`);
     }
     const end = path[n];
-    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Bankroll from ${money(start * stake, false)} to ${money(end * stake, false)} over ${n} spins">
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Running result from ${money(start * stake)} to ${money(end * stake)} over ${n} spins">
       <line x1="0" x2="${W}" y1="${y(start)}" y2="${y(start)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
       <path d="${d}" fill="none" stroke="${end >= start ? 'var(--good)' : 'var(--bad)'}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
       ${bustAt !== null ? `<circle cx="${x(n)}" cy="${y(end)}" r="4" fill="var(--bad)" stroke="var(--surface)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}${hit.join('')}</svg>`;
   }
 
   const pfText = (x) => (Number.isFinite(x) ? x.toFixed(2) : Number.isNaN(x) ? '–' : '∞');
+  const BET_NAME = { straight: 'Straight up', split: 'Split', trio: 'Trio', street: 'Street', corner: 'Corner', 'six line': 'Six line' };
+  const betLabel = (b) => (b.kind === 'outside' ? C.OUTSIDE[b.key].label : `${BET_NAME[b.kind]} ${b.pockets.map(C.label).join('/')}`);
 
   function renderStrategies(d) {
     const w = wheelOf(d);
     const win = prefs.twin[d.id] ?? 'all';
     const pockets = C.windowed(spinsOf(d.id), win).map((s) => s.pocket);
     const n = pockets.length, stake = prefs.stake > 0 ? prefs.stake : 10;
-    const target = C.TARGETS.find((t) => t.k === prefs.stratTarget) || C.TARGETS[0];
-    const opts = { target: target.k, bankroll: prefs.bankroll, tableMax: prefs.tableMax };
+    const bankroll = prefs.bankroll > 0 ? prefs.bankroll : Infinity;
     const edge = w.size === 38 ? 2 / 38 : 1 / 37;
     const chipRow = (act, cur, vals, label) => `<div class="chips" role="group" aria-label="${label}">${vals.map(([v, l]) => `<button class="chip" data-act="${act}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('')}</div>`;
-    const tgtRow = (ks) => chipRow('strat-target', target.k, ks.map((k) => { const t = C.TARGETS.find((x) => x.k === k); return [k, t.label]; }), 'Bet');
-    const head = `<section class="card stack"><div class="spread"><h2>Standard strategies</h2><span class="badge">Replay, not a forecast</span></div>
-      <p class="small muted" style="margin:0">Replays this dealer's recorded spins, oldest first, with each classic betting system, and compares the result with the same system on random spins from a fair wheel.</p>
+    const head = `<section class="card stack"><div class="spread"><h2>Placement strategies</h2><span class="badge">Replay, not a forecast</span></div>
+      <p class="small muted" style="margin:0">Standard ways of spreading chips over the table, each staked the same every spin and replayed over this dealer's recorded spins, oldest first.${w.size === 38 ? ' The announced bets (Voisins, Tiers, Orphelins, Jeu Zéro) follow the European wheel, so they are left out for this American wheel.' : ''}</p>
       ${windowChips('twin', win)}
-      <div class="stack" style="gap:6px"><span class="eyebrow">Bet on · even money (1 to 1)</span>${tgtRow(['red', 'black', 'odd', 'even', 'low', 'high'])}
-        <span class="eyebrow">Dozens and columns (2 to 1)</span>${tgtRow(['d1', 'd2', 'd3', 'c1', 'c2', 'c3'])}</div>
       <div class="grid2">
-        <label class="f"><span>Unit (one chip)</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
-        <div class="stack" style="gap:6px"><span class="eyebrow">Bankroll</span>${chipRow('bankroll', prefs.bankroll, [50, 100, 250, 500].map((u) => [u, money(u * stake, false)]), 'Bankroll')}</div>
-      </div>
-      <div class="stack" style="gap:6px"><span class="eyebrow">Table limit per bet</span>${chipRow('table-max', prefs.tableMax, [20, 50, 100, 500].map((u) => [u, money(u * stake, false)]), 'Table limit')}</div></section>`;
+        <label class="f"><span>Chip value</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
+        <div class="stack" style="gap:6px"><span class="eyebrow">Bankroll</span>${chipRow('bankroll', prefs.bankroll > 0 ? prefs.bankroll : 0, [[0, 'No limit'], ...[100, 250, 500].map((u) => [u, money(u * stake, false)])], 'Bankroll')}</div>
+      </div></section>`;
     if (n < 10) return `${head}<section class="card empty"><h2>Not enough spins</h2><p class="muted small">Record at least 10 spins for this dealer to replay the strategies.</p><button class="btn primary" data-act="tab" data-tab="record">Record spins</button></section>`;
 
-    const rows = C.STRATEGIES.map((st) => {
-      const r = C.simulateStrategy(pockets, st.id, opts);
-      const b = C.strategyBenchmark(n, w, st.id, opts);
-      const beat = b.nets.filter((x) => x < r.net).length / b.sims;
-      return { st, r, b, beat };
+    const rows = C.placementsFor(w).map((sys) => {
+      const pn = C.placementNet(sys, w), r = C.simulatePlacement(pockets, pn, bankroll), b = C.placementBenchmark(n, w, pn, bankroll);
+      return { sys, pn, r, b, beat: b.nets.filter((x) => x < r.net).length / b.sims };
     });
     const col = (x) => (x > 0 ? 'var(--good)' : x < 0 ? 'var(--bad)' : 'inherit');
-    const summary = `<section class="card stack"><div class="spread"><h2>Profit factor</h2><span class="small muted">${n} spins · ${esc(target.label)}</span></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Strategy</th><th class="r">Net</th><th class="r">Profit factor</th><th class="r">Fair wheel</th></tr></thead><tbody>
-        ${rows.map(({ st, r, b }) => `<tr><td>${esc(st.name)}${r.bustAt !== null ? ' <span class="badge bad">Bust</span>' : ''}</td><td class="r num" style="color:${col(r.net)}">${money(r.net * stake)}</td>
-          <td class="r num"><b>${pfText(r.pf)}</b></td><td class="r num muted">${pfText(b.pfMedian)}</td></tr>`).join('')}
+    const summary = `<section class="card stack"><div class="spread"><h2>Profit factor</h2><span class="small muted">${n} spins · chip ${money(stake, false)}</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Strategy</th><th class="r">Net</th><th class="r">Profit factor</th><th class="r">Fair</th></tr></thead><tbody>
+        ${rows.map(({ sys, pn, r }) => `<tr><td>${esc(sys.name)}${r.bustAt !== null ? ' <span class="badge bad">Bust</span>' : ''}</td><td class="r num" style="color:${col(r.net)}">${money(r.net * stake)}</td>
+          <td class="r num"><b>${pfText(r.pf)}</b></td><td class="r num muted">${pfText(pn.fairPf)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="small muted" style="margin:0"><b>Profit factor</b> = total won on winning spins ÷ total lost on losing spins. Above 1.00 the strategy made money on these spins; below 1.00 it lost. <b>Fair wheel</b> is the typical (median) profit factor of the same strategy over ${rows[0].b.sims} random runs of ${n} spins.</p></section>`;
+      <p class="small muted" style="margin:0"><b>Profit factor</b> = total won on winning spins ÷ total lost on losing spins. Above 1.00 the spread made money on these spins; below 1.00 it lost. <b>Fair</b> is its long-run profit factor on a fair wheel.</p></section>`;
 
-    const cards = rows.map(({ st, r, b, beat }) => {
+    const cards = rows.map(({ sys, pn, r, b, beat }) => {
       const flag = beat >= 0.95;
+      // Group numbers by what they pay, best first.
+      const byNet = new Map();
+      w.pockets.forEach((p) => byNet.set(pn.net[p], [...(byNet.get(pn.net[p]) || []), p]));
+      const outcomes = [...byNet.entries()].sort((x, y) => y[0] - x[0]).map(([v, ps]) => `<tr><td class="num" style="color:${col(v)}">${money(v * stake)}</td><td class="r num">${ps.length}</td><td class="r num">${pct(ps.length / w.size)}</td></tr>`).join('');
       const stat = (l, v, c) => `<div class="kv"><span class="small muted">${l}</span><b class="num"${c ? ` style="color:${c}"` : ''}>${v}</b></div>`;
-      return `<section class="card stack strat-card"><div class="spread"><h2>${esc(st.name)}</h2><span class="badge${r.pf > 1 ? ' good' : r.pf < 1 ? ' bad' : ''}">PF ${pfText(r.pf)}</span></div>
-        <p class="small muted" style="margin:0">${esc(st.desc)}</p>
-        ${bankrollSpark(r.path, prefs.bankroll, stake, r.bustAt)}
-        <span class="small muted">Bankroll ${money(prefs.bankroll * stake, false)} → ${money(r.bank * stake, false)} over ${r.played} spins · dashed line = start, bottom = 0</span>
+      const hitRate = r.played ? r.wins / r.played : NaN, fairHit = pn.net.filter((x) => x > 0).length / w.size;
+      return `<section class="card stack strat-card"><div class="spread"><h2>${esc(sys.name)}</h2><span class="badge${r.pf > 1 ? ' good' : r.pf < 1 ? ' bad' : ''}">PF ${pfText(r.pf)}</span></div>
+        <p class="small muted" style="margin:0">${esc(sys.desc)}</p>
+        ${tableMini(w, { pockets: w.pockets.filter((p) => sys.bets.some((x) => x.pockets.includes(p))) }, null, sys.bets, { full: true, tag: (x) => x.chips, label: `${sys.name} on the betting table: ${sys.bets.map((x) => `${x.chips} on ${betLabel(x)}`).join(', ')}` })}
+        <span class="small muted">Numbers on chips = chips on that spot. ${pn.cost} chip${pn.cost === 1 ? '' : 's'} (${money(pn.cost * stake, false)}) every spin; ${pn.covered} of ${w.size} numbers pay something.</span>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>If the ball lands on…</th><th class="r">Numbers</th><th class="r">Chance</th></tr></thead><tbody>${outcomes}</tbody></table></div>
+        <span class="eyebrow">Replay on this dealer</span>
+        ${bankrollSpark(r.path, 0, stake, r.bustAt)}
+        <span class="small muted">Running result over ${r.played} spins · dashed line = break-even</span>
         <div class="kv-grid">
           ${stat('Net result', money(r.net * stake), col(r.net))}${stat('Profit factor', pfText(r.pf))}
-          ${stat('Won / lost spins', `${r.wins} / ${r.losses}`)}${stat('Max drawdown', money(r.maxDD * stake, false))}
-          ${stat('Total wagered', money(r.wagered * stake, false))}${stat('Largest bet', money(r.largest * stake, false))}
+          ${stat('Winning spins', `${r.wins} of ${r.played} (${pct(hitRate)})`)}${stat('Fair chance', pct(fairHit))}
+          ${stat('Max drawdown', money(r.maxDD * stake, false))}${stat('Total staked', money(r.wagered * stake, false))}
         </div>
-        <p class="small" style="margin:0">${r.bustAt !== null ? `<b style="color:var(--bad)">Bankroll ran out after ${r.played} of ${n} spins.</b> ` : ''}${r.capHits ? `Hit the table limit or ran short ${r.capHits} time${r.capHits === 1 ? '' : 's'} and restarted at one unit. ` : ''}Expected on a fair wheel: <span class="num">${money(-edge * r.wagered * stake)}</span> (${pct(edge, 2)} of the amount wagered).</p>
+        <p class="small" style="margin:0">${r.bustAt !== null ? `<b style="color:var(--bad)">Bankroll ran out after ${r.played} of ${n} spins.</b> ` : ''}Expected on a fair wheel: <span class="num">${money(-edge * r.wagered * stake)}</span> (${pct(edge, 2)} of the amount staked).</p>
         <div class="verdict ${flag ? 'flag' : 'na'}"><span class="ico">${flag ? '!' : 'i'}</span><div>${flag
-          ? `<b>Did better than ${pct(beat, 0)} of random runs.</b> Unusual for a fair wheel, but a past run doesn't make the next one likely to repeat it.`
-          : `Did better than ${pct(beat, 0)} of ${b.sims} random fair-wheel runs. On random spins this strategy ends in profit ${pct(b.profitable, 0)} of the time${b.bustRate ? ` and runs out of money ${pct(b.bustRate, 0)} of the time` : ''}.`}</div></div></section>`;
+          ? `<b>Did better than ${pct(beat, 0)} of ${b.sims} random runs.</b> Unusual for a fair wheel; re-check on new spins before reading anything into it.`
+          : `Did better than ${pct(beat, 0)} of ${b.sims} random fair-wheel runs of ${n} spins. On random spins this spread ends ahead ${pct(b.profitable, 0)} of the time${b.bustRate ? ` and runs out of money ${pct(b.bustRate, 0)} of the time` : ''}.`}</div></div></section>`;
     }).join('');
 
     return head + summary + cards + `<section class="card stack"><h2>About these strategies</h2>
-      <p class="small" style="margin:0">Every bet on a ${w.size === 38 ? 'American' : 'European'} wheel loses ${pct(edge, 2)} of what is staked on average, and no pattern of raising or lowering stakes changes that. Progressions only change the shape of the results: Martingale and Labouchère win small amounts often and lose large amounts rarely; Paroli does the opposite. A profit factor above 1 on past spins is luck unless it also beats the fair-wheel runs by a wide margin and keeps doing so on new spins.</p>
-      <p class="small muted" style="margin:0">Zero loses every even-money, dozen and column bet (no la partage). Bankroll and limits are in units of one chip.</p></section>`;
+      <p class="small" style="margin:0">Every chip on a ${w.size === 38 ? 'American' : 'European'} table loses ${pct(edge, 2)} of its value on average, wherever it is placed, so no spread changes the house edge. Spreads only change the shape of the results: wide ones like Romanosky and James Bond win often but small and lose big when they miss; narrow ones like Jeu Zéro and Orphelins miss often and win big. A profit factor above 1 on past spins is luck unless it clearly beats the random runs and keeps doing so on new spins.</p>
+      <p class="small muted" style="margin:0">Voisins, Tiers, Orphelins and Jeu Zéro can usually be called to the dealer at European tables. Zero loses every outside bet (no la partage).</p></section>`;
   }
 
   // ----- predict -----
@@ -1174,9 +1197,8 @@
     pwin: (el) => { const v = el.dataset.v; prefs.pwin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
     sector: (el) => { prefs.sector = el.dataset.v; savePrefs(); render(); },
     twin: (el) => { const v = el.dataset.v; prefs.twin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
-    'strat-target': (el) => { prefs.stratTarget = el.dataset.v; savePrefs(); render(); },
     bankroll: (el) => { prefs.bankroll = Number(el.dataset.v); savePrefs(); render(); },
-    'table-max': (el) => { prefs.tableMax = Number(el.dataset.v); savePrefs(); render(); },
+
     halflife: (el) => { prefs.halfLife = Number(el.dataset.v); savePrefs(); render(); },
     model: (el) => { prefs.model = el.dataset.v; savePrefs(); render(); },
     'save-pred': () => {

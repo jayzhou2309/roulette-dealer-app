@@ -112,8 +112,8 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('text=Saved picks hit');
     await page.screenshot({ path: shot + 'predict-dark.png', fullPage: true });
     await page.click('.tab[data-tab="strategy"]');
-    await page.waitForSelector('text=Standard strategies');
-    await page.click('.chip[data-act="strat-target"][data-v="d2"]');
+    await page.waitForSelector('text=Placement strategies');
+    await page.click('.chip[data-act="bankroll"][data-v="100"]');
     console.log('strategy rows:', (await page.$$eval('section:has(h2:text("Profit factor")) tbody tr', (r) => r.map((x) => x.innerText.replace(/\s+/g, ' ')))).join(' | '));
     await page.screenshot({ path: shot + 'strategies-dark.png', fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
