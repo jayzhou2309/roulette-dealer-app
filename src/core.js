@@ -466,6 +466,81 @@ const Core = (() => {
     return { n, expected: e, hot, cold };
   }
 
+  // ----- standard betting strategies -----
+  // Outside bets a progression can follow, with their payout (to 1).
+  const TARGETS = GROUPS.flatMap((g) => g.items.filter((i) => i.k !== 'green').map((i) => ({ ...i, pays: g.key === 'dozen' || g.key === 'column' ? 2 : 1 })));
+  const STRATEGIES = [
+    { id: 'flat', name: 'Flat bet', desc: 'The same one-unit stake every spin.' },
+    { id: 'martingale', name: 'Martingale', desc: 'Double the stake after a loss; back to one unit after a win.' },
+    { id: 'paroli', name: 'Paroli (reverse Martingale)', desc: 'Double the stake after a win, up to three wins in a row; back to one unit after a loss or the third win.' },
+    { id: 'dalembert', name: "D'Alembert", desc: 'One unit more after a loss, one unit less after a win.' },
+    { id: 'fibonacci', name: 'Fibonacci', desc: 'Move one step along 1, 1, 2, 3, 5, 8… after a loss; two steps back after a win.' },
+    { id: 'labouchere', name: 'Labouchère', desc: 'Start with the line 1-2-3-4 and stake first + last. A win crosses both off, a loss adds the stake to the end; a finished line starts again.' },
+    { id: 'jamesbond', name: 'James Bond', desc: '20 units every spin: 14 on 19–36, 5 on the 13–18 six line, 1 on zero. Ignores the chosen bet.' },
+  ];
+  const FIB = [1, 1];
+  const fib = (i) => { while (FIB.length <= i) FIB.push(FIB[FIB.length - 1] + FIB[FIB.length - 2]); return FIB[i]; };
+
+  // Replays `pockets` in order with a progression, in units of one chip.
+  // A stake above the table limit or the money left resets the progression to one unit (capHits);
+  // the run stops when the bankroll can't cover the smallest stake.
+  function simulateStrategy(pockets, id, opts = {}) {
+    const bankroll = opts.bankroll ?? 100, tableMax = opts.tableMax ?? 100;
+    const target = TARGETS.find((t) => t.k === (opts.target || 'red'));
+    let bank = bankroll, peak = bankroll, maxDD = 0, won = 0, lost = 0, wins = 0, losses = 0, wagered = 0, largest = 0, capHits = 0, bustAt = null;
+    let step = 1, run = 0, line = [1, 2, 3, 4];
+    const path = [bank];
+    const reset = () => { step = id === 'fibonacci' ? 0 : 1; run = 0; line = [1, 2, 3, 4]; };
+    reset();
+    const want = () => (id === 'fibonacci' ? fib(step) : id === 'labouchere' ? (line.length > 1 ? line[0] + line[line.length - 1] : line[0]) : id === 'flat' ? 1 : step);
+    for (let i = 0; i < pockets.length; i++) {
+      const y = pockets[i];
+      let stake, result;
+      if (id === 'jamesbond') {
+        stake = 20;
+        if (bank < stake) { bustAt = i; break; }
+        result = y >= 19 && y <= 36 ? 8 : y >= 13 && y <= 18 ? 10 : y === 0 ? 16 : -20;
+      } else {
+        stake = want();
+        if (stake > Math.min(tableMax, bank)) { capHits++; reset(); stake = 1; }
+        if (bank < stake) { bustAt = i; break; }
+        const hit = target.test(y);
+        result = hit ? stake * target.pays : -stake;
+        if (id === 'martingale') step = hit ? 1 : step * 2;
+        else if (id === 'paroli') { if (hit && run < 2) { run++; step *= 2; } else reset(); }
+        else if (id === 'dalembert') step = Math.max(1, step + (hit ? -1 : 1));
+        else if (id === 'fibonacci') step = hit ? Math.max(0, step - 2) : step + 1;
+        else if (id === 'labouchere') {
+          if (hit) { line = line.slice(1, -1); if (!line.length) line = [1, 2, 3, 4]; } else line.push(stake);
+        }
+      }
+      wagered += stake; largest = Math.max(largest, stake);
+      if (result > 0) { won += result; wins++; } else if (result < 0) { lost -= result; losses++; }
+      bank += result; peak = Math.max(peak, bank); maxDD = Math.max(maxDD, peak - bank);
+      path.push(bank);
+    }
+    return {
+      id, played: path.length - 1, wins, losses, net: bank - bankroll, bank, won, lost, wagered, largest, capHits, bustAt, maxDD, path,
+      pf: lost > 0 ? won / lost : won > 0 ? Infinity : NaN,
+    };
+  }
+
+  // Same strategy on `sims` random fair-wheel sequences of the same length, for comparison.
+  function strategyBenchmark(n, w, id, opts = {}, sims = 200, seed = 7) {
+    const r = rng(seed), pfs = [], nets = [];
+    let busts = 0;
+    for (let k = 0; k < sims; k++) {
+      const ps = Array.from({ length: n }, () => Math.floor(r() * w.size));
+      const res = simulateStrategy(ps, id, opts);
+      if (!Number.isNaN(res.pf)) pfs.push(res.pf);
+      nets.push(res.net);
+      if (res.bustAt !== null) busts++;
+    }
+    pfs.sort((a, b) => a - b); nets.sort((a, b) => a - b);
+    const med = (a) => (a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : NaN);
+    return { sims, pfMedian: med(pfs), netMedian: med(nets), nets, profitable: nets.filter((x) => x > 0).length / sims, bustRate: busts / sims };
+  }
+
   // Seeded generator for clearly-labelled simulated sample data.
   function rng(seed) {
     let s = seed >>> 0;
@@ -477,7 +552,7 @@ const Core = (() => {
     wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
     categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
     predict, logLoss, brier, backtest, evaluate, mean, rng, weightedCounts, DEFAULT_HALF_LIFE,
-    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, pickBacktest, hotCold,
+    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, TARGETS, STRATEGIES, simulateStrategy, strategyBenchmark, pickBacktest, hotCold,
   };
 })();
 

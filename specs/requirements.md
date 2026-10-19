@@ -80,6 +80,12 @@ Format: user stories with EARS acceptance criteria. IDs trace to PRD sections.
 12. Saved estimates shall store the chip value and show the win/loss of the pick and the multi-number bet once scored.
 13. **Bet placement:** The betting-table layout shall mark where to place chips for the multi-number bet, using the fewest inside bets (straight up, split, trio, street, corner, six line) that cover exactly its numbers, each staked with one chip; a list shall give each placement's bet type, numbers, odds, stake and amount paid back if it hits, and the total shall show the chips staked and the least amount paid back on any hit. For a neighbours bet it shall note that the bet can be called to the dealer.
 
+## R5b Standard strategies (change request)
+1. A Strategies tab shall replay the dealer's recorded spins (window: last 50/100/250/all), oldest first, with Flat, Martingale, Paroli, D'Alembert, Fibonacci, Labouchère and James Bond, on a chosen outside bet (red, black, odd, even, 1–18, 19–36, a dozen or a column).
+2. Unit (chip value), bankroll and table limit shall be settable; a stake above the limit or the money left restarts the progression at one unit, and a run stops when the bankroll can't cover the next stake.
+3. For each strategy the app shall show net result, profit factor (gross won ÷ gross lost), won/lost spins, max drawdown, total wagered, largest bet, a bankroll line, and the expected loss at the house edge.
+4. Each strategy shall be compared with 200 seeded random fair-wheel runs of the same length: median profit factor, share of runs beaten, share profitable and share that ran out of money.
+
 ## R6 Prediction history & evaluation (PRD §4.6, P1)
 
 1. When the user saves a prediction, the app shall store: casinoId, dealerId, created-at, cutoff (latest spin time used), window, model id/version/params, wheel, sample size, full probability distribution, and the pick and sector pockets.

@@ -33,6 +33,7 @@
     stats: '<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
     undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     predict: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>',
+    strategy: '<svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/><path d="M3 21h18"/></svg>',
   };
 
   // ---------- state ----------
@@ -47,7 +48,7 @@
   let lastTap = { p: null, at: 0 };
 
   function loadPrefs() {
-    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'weighted', alpha: 5, halfLife: 50, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10 };
+    const d = { view: { name: 'home' }, swin: {}, pwin: {}, model: 'weighted', alpha: 5, halfLife: 50, session: {}, showArchived: false, dealerFilter: 'active', sector: 'n5', stake: 10, twin: {}, stratTarget: 'red', bankroll: 100, tableMax: 100 };
     try { return Object.assign(d, JSON.parse(localStorage.getItem('rda.prefs') || '{}')); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem('rda.prefs', JSON.stringify({ ...prefs, view: V })); } catch { /* convenience only */ } }
@@ -308,7 +309,7 @@
   }
 
   function renderTabs() {
-    const tabs = [['record', 'Record'], ['history', 'History'], ['stats', 'Stats'], ['predict', 'Predict']];
+    const tabs = [['record', 'Record'], ['history', 'History'], ['stats', 'Stats'], ['predict', 'Predict'], ['strategy', 'Strategies']];
     return `<div class="tabs-in">${tabs.map(([k, l]) => `<button class="tab" data-act="tab" data-tab="${k}" ${V.tab === k ? 'aria-current="page"' : ''}>${ICON[k]}<span>${l}</span></button>`).join('')}</div>`;
   }
 
@@ -316,7 +317,7 @@
     const d = S.dealers[V.dealerId];
     V.tab = V.tab || 'record';
     const arch = d.status === 'archived' ? '<div class="notice">This dealer is archived. History, statistics and saved estimates stay available.</div>' : '';
-    return arch + ({ record: renderRecord, history: renderHistory, stats: renderStats, predict: renderPredict }[V.tab])(d);
+    return arch + ({ record: renderRecord, history: renderHistory, stats: renderStats, predict: renderPredict, strategy: renderStrategies }[V.tab])(d);
   }
 
   // ----- record -----
@@ -690,6 +691,85 @@
       <div class="stack" style="gap:6px"><span class="eyebrow">Cost and payout</span>${costHtml}</div>
       <div class="stack" style="gap:6px"><span class="eyebrow">Track record on this dealer</span>${record}</div>
     </section>`;
+  }
+
+  // ----- strategies -----
+  // Bankroll over the replay: one line against the starting bankroll, with hover bands for readouts.
+  function bankrollSpark(path, start, stake, bustAt) {
+    const W = 300, H = 64, n = path.length - 1, lo = Math.min(0, ...path), hi = Math.max(start * 1.05, ...path);
+    const x = (i) => (n ? (i / n) * W : 0), y = (v) => H - 4 - ((v - lo) / (hi - lo || 1)) * (H - 8);
+    const d = path.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('');
+    const bands = Math.min(n, 60), hit = [];
+    for (let b = 0; b < bands; b++) {
+      const i = Math.round(((b + 1) / bands) * n);
+      hit.push(`<rect x="${x(Math.round((b / bands) * n)).toFixed(1)}" y="0" width="${(W / bands).toFixed(1)}" height="${H}" fill="transparent" data-tip="After spin ${i}: bankroll ${money(path[i] * stake, false)} (${money((path[i] - start) * stake)})"/>`);
+    }
+    const end = path[n];
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Bankroll from ${money(start * stake, false)} to ${money(end * stake, false)} over ${n} spins">
+      <line x1="0" x2="${W}" y1="${y(start)}" y2="${y(start)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+      <path d="${d}" fill="none" stroke="${end >= start ? 'var(--good)' : 'var(--bad)'}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      ${bustAt !== null ? `<circle cx="${x(n)}" cy="${y(end)}" r="4" fill="var(--bad)" stroke="var(--surface)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}${hit.join('')}</svg>`;
+  }
+
+  const pfText = (x) => (Number.isFinite(x) ? x.toFixed(2) : Number.isNaN(x) ? '–' : '∞');
+
+  function renderStrategies(d) {
+    const w = wheelOf(d);
+    const win = prefs.twin[d.id] ?? 'all';
+    const pockets = C.windowed(spinsOf(d.id), win).map((s) => s.pocket);
+    const n = pockets.length, stake = prefs.stake > 0 ? prefs.stake : 10;
+    const target = C.TARGETS.find((t) => t.k === prefs.stratTarget) || C.TARGETS[0];
+    const opts = { target: target.k, bankroll: prefs.bankroll, tableMax: prefs.tableMax };
+    const edge = w.size === 38 ? 2 / 38 : 1 / 37;
+    const chipRow = (act, cur, vals, label) => `<div class="chips" role="group" aria-label="${label}">${vals.map(([v, l]) => `<button class="chip" data-act="${act}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('')}</div>`;
+    const tgtRow = (ks) => chipRow('strat-target', target.k, ks.map((k) => { const t = C.TARGETS.find((x) => x.k === k); return [k, t.label]; }), 'Bet');
+    const head = `<section class="card stack"><div class="spread"><h2>Standard strategies</h2><span class="badge">Replay, not a forecast</span></div>
+      <p class="small muted" style="margin:0">Replays this dealer's recorded spins, oldest first, with each classic betting system, and compares the result with the same system on random spins from a fair wheel.</p>
+      ${windowChips('twin', win)}
+      <div class="stack" style="gap:6px"><span class="eyebrow">Bet on · even money (1 to 1)</span>${tgtRow(['red', 'black', 'odd', 'even', 'low', 'high'])}
+        <span class="eyebrow">Dozens and columns (2 to 1)</span>${tgtRow(['d1', 'd2', 'd3', 'c1', 'c2', 'c3'])}</div>
+      <div class="grid2">
+        <label class="f"><span>Unit (one chip)</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
+        <div class="stack" style="gap:6px"><span class="eyebrow">Bankroll</span>${chipRow('bankroll', prefs.bankroll, [50, 100, 250, 500].map((u) => [u, money(u * stake, false)]), 'Bankroll')}</div>
+      </div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">Table limit per bet</span>${chipRow('table-max', prefs.tableMax, [20, 50, 100, 500].map((u) => [u, money(u * stake, false)]), 'Table limit')}</div></section>`;
+    if (n < 10) return `${head}<section class="card empty"><h2>Not enough spins</h2><p class="muted small">Record at least 10 spins for this dealer to replay the strategies.</p><button class="btn primary" data-act="tab" data-tab="record">Record spins</button></section>`;
+
+    const rows = C.STRATEGIES.map((st) => {
+      const r = C.simulateStrategy(pockets, st.id, opts);
+      const b = C.strategyBenchmark(n, w, st.id, opts);
+      const beat = b.nets.filter((x) => x < r.net).length / b.sims;
+      return { st, r, b, beat };
+    });
+    const col = (x) => (x > 0 ? 'var(--good)' : x < 0 ? 'var(--bad)' : 'inherit');
+    const summary = `<section class="card stack"><div class="spread"><h2>Profit factor</h2><span class="small muted">${n} spins · ${esc(target.label)}</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Strategy</th><th class="r">Net</th><th class="r">Profit factor</th><th class="r">Fair wheel</th></tr></thead><tbody>
+        ${rows.map(({ st, r, b }) => `<tr><td>${esc(st.name)}${r.bustAt !== null ? ' <span class="badge bad">Bust</span>' : ''}</td><td class="r num" style="color:${col(r.net)}">${money(r.net * stake)}</td>
+          <td class="r num"><b>${pfText(r.pf)}</b></td><td class="r num muted">${pfText(b.pfMedian)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin:0"><b>Profit factor</b> = total won on winning spins ÷ total lost on losing spins. Above 1.00 the strategy made money on these spins; below 1.00 it lost. <b>Fair wheel</b> is the typical (median) profit factor of the same strategy over ${rows[0].b.sims} random runs of ${n} spins.</p></section>`;
+
+    const cards = rows.map(({ st, r, b, beat }) => {
+      const flag = beat >= 0.95;
+      const stat = (l, v, c) => `<div class="kv"><span class="small muted">${l}</span><b class="num"${c ? ` style="color:${c}"` : ''}>${v}</b></div>`;
+      return `<section class="card stack strat-card"><div class="spread"><h2>${esc(st.name)}</h2><span class="badge${r.pf > 1 ? ' good' : r.pf < 1 ? ' bad' : ''}">PF ${pfText(r.pf)}</span></div>
+        <p class="small muted" style="margin:0">${esc(st.desc)}</p>
+        ${bankrollSpark(r.path, prefs.bankroll, stake, r.bustAt)}
+        <span class="small muted">Bankroll ${money(prefs.bankroll * stake, false)} → ${money(r.bank * stake, false)} over ${r.played} spins · dashed line = start, bottom = 0</span>
+        <div class="kv-grid">
+          ${stat('Net result', money(r.net * stake), col(r.net))}${stat('Profit factor', pfText(r.pf))}
+          ${stat('Won / lost spins', `${r.wins} / ${r.losses}`)}${stat('Max drawdown', money(r.maxDD * stake, false))}
+          ${stat('Total wagered', money(r.wagered * stake, false))}${stat('Largest bet', money(r.largest * stake, false))}
+        </div>
+        <p class="small" style="margin:0">${r.bustAt !== null ? `<b style="color:var(--bad)">Bankroll ran out after ${r.played} of ${n} spins.</b> ` : ''}${r.capHits ? `Hit the table limit or ran short ${r.capHits} time${r.capHits === 1 ? '' : 's'} and restarted at one unit. ` : ''}Expected on a fair wheel: <span class="num">${money(-edge * r.wagered * stake)}</span> (${pct(edge, 2)} of the amount wagered).</p>
+        <div class="verdict ${flag ? 'flag' : 'na'}"><span class="ico">${flag ? '!' : 'i'}</span><div>${flag
+          ? `<b>Did better than ${pct(beat, 0)} of random runs.</b> Unusual for a fair wheel, but a past run doesn't make the next one likely to repeat it.`
+          : `Did better than ${pct(beat, 0)} of ${b.sims} random fair-wheel runs. On random spins this strategy ends in profit ${pct(b.profitable, 0)} of the time${b.bustRate ? ` and runs out of money ${pct(b.bustRate, 0)} of the time` : ''}.`}</div></div></section>`;
+    }).join('');
+
+    return head + summary + cards + `<section class="card stack"><h2>About these strategies</h2>
+      <p class="small" style="margin:0">Every bet on a ${w.size === 38 ? 'American' : 'European'} wheel loses ${pct(edge, 2)} of what is staked on average, and no pattern of raising or lowering stakes changes that. Progressions only change the shape of the results: Martingale and Labouchère win small amounts often and lose large amounts rarely; Paroli does the opposite. A profit factor above 1 on past spins is luck unless it also beats the fair-wheel runs by a wide margin and keeps doing so on new spins.</p>
+      <p class="small muted" style="margin:0">Zero loses every even-money, dozen and column bet (no la partage). Bankroll and limits are in units of one chip.</p></section>`;
   }
 
   // ----- predict -----
@@ -1093,6 +1173,10 @@
     swin: (el) => { const v = el.dataset.v; prefs.swin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
     pwin: (el) => { const v = el.dataset.v; prefs.pwin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
     sector: (el) => { prefs.sector = el.dataset.v; savePrefs(); render(); },
+    twin: (el) => { const v = el.dataset.v; prefs.twin[V.dealerId] = v === 'all' ? 'all' : Number(v); savePrefs(); render(); },
+    'strat-target': (el) => { prefs.stratTarget = el.dataset.v; savePrefs(); render(); },
+    bankroll: (el) => { prefs.bankroll = Number(el.dataset.v); savePrefs(); render(); },
+    'table-max': (el) => { prefs.tableMax = Number(el.dataset.v); savePrefs(); render(); },
     halflife: (el) => { prefs.halfLife = Number(el.dataset.v); savePrefs(); render(); },
     model: (el) => { prefs.model = el.dataset.v; savePrefs(); render(); },
     'save-pred': () => {

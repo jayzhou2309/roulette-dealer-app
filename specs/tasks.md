@@ -55,6 +55,10 @@ Order follows the PRD's direction: CRM and reliable spin history first, analytic
 ## Phase 5f — Bet placement (change request)
 - [x] T36 Core `betPlacement` (minimum exact cover with inside bets, EU/US zero bets); SVG table with chips on lines and corners; placement list — R5.13
 
+## Phase 5g — Standard strategies (change request)
+- [x] T37 Core `simulateStrategy` (7 systems, limits, bust) and `strategyBenchmark` (seeded fair-wheel runs) — R5b.1–R5b.4
+- [x] T38 Strategies tab: bet/unit/bankroll/limit controls, profit-factor table, per-strategy card with bankroll line and fair-wheel comparison — R5b.1–R5b.4
+
 ## Phase 6 — Ship
 - [x] T24 Build script inlines modules into `dist/index.html`
 - [x] T25 Playwright smoke test at phone width, light + dark

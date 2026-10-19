@@ -318,3 +318,30 @@ test('betPlacement covers exactly the numbers with the fewest inside bets', () =
     }
   }
 });
+
+test('strategy replay: progressions and profit factor', () => {
+  const ps = [1, 2, 3, 4, 5, 0, 7, 9, 12, 14]; // red: 1 3 5 7 9 12 14
+  const flat = C.simulateStrategy(ps, 'flat', { target: 'red' });
+  assert.equal(flat.net, 4);
+  assert.equal(flat.wins, 7);
+  close(flat.pf, 7 / 3);
+  const paroli = C.simulateStrategy(ps, 'paroli', { target: 'red' });
+  assert.deepEqual(paroli.path, [100, 101, 99, 100, 98, 99, 97, 98, 100, 104, 105]);
+  const mart = C.simulateStrategy([2, 4, 6, 1], 'martingale', { target: 'red' });
+  assert.deepEqual(mart.path, [100, 99, 97, 93, 101]);
+  // table limit resets the progression to one unit
+  const capped = C.simulateStrategy([2, 4, 6, 1], 'martingale', { target: 'red', tableMax: 3 });
+  assert.equal(capped.capHits, 1);
+  assert.equal(capped.largest, 2);
+  // dozens pay 2 to 1
+  assert.equal(C.simulateStrategy([13, 1], 'flat', { target: 'd2' }).net, 1);
+  // James Bond: 19-36 +8, 13-18 +10, zero +16, else -20; stops when 20 units aren't left
+  assert.deepEqual(C.simulateStrategy([20, 15, 0, 5], 'jamesbond').path, [100, 108, 118, 134, 114]);
+  const bust = C.simulateStrategy([1, 1, 1, 1, 1, 1], 'jamesbond', { bankroll: 50 });
+  assert.equal(bust.bustAt, 2);
+  assert.ok(Number.isNaN(C.simulateStrategy([], 'flat').pf));
+  assert.equal(C.simulateStrategy([1], 'flat').pf, Infinity);
+  // fair-wheel flat even-money bet: profit factor near 18/19
+  const b = C.strategyBenchmark(2000, EU, 'flat', { target: 'red', bankroll: 1e6 }, 100);
+  assert.ok(Math.abs(b.pfMedian - 18 / 19) < 0.03, String(b.pfMedian));
+});
