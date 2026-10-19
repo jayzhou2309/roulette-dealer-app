@@ -9,8 +9,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (req.mode === 'navigate') {
-    // network first so updates arrive, cached shell when offline
-    e.respondWith(fetch(req).then((res) => { caches.open(CACHE).then((c) => c.put('index.html', res.clone())); return res; })
+    // network first (skipping the browser's HTTP cache) so updates arrive, cached shell when offline
+    e.respondWith(fetch(req.url, { cache: 'no-store', credentials: 'same-origin' }).then((res) => { caches.open(CACHE).then((c) => c.put('index.html', res.clone())); return res; })
       .catch(() => caches.match('index.html')));
     return;
   }

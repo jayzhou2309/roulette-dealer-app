@@ -43,7 +43,14 @@ const html = `<!doctype html>
 ${body}
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // Check for a new version on launch and whenever the app comes back to the foreground;
+  // reload once when the new version takes over so the screen isn't left on the old build.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {}));
 }
 </script>
 </body>
@@ -83,8 +90,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (req.mode === 'navigate') {
-    // network first so updates arrive, cached shell when offline
-    e.respondWith(fetch(req).then((res) => { caches.open(CACHE).then((c) => c.put('index.html', res.clone())); return res; })
+    // network first (skipping the browser's HTTP cache) so updates arrive, cached shell when offline
+    e.respondWith(fetch(req.url, { cache: 'no-store', credentials: 'same-origin' }).then((res) => { caches.open(CACHE).then((c) => c.put('index.html', res.clone())); return res; })
       .catch(() => caches.match('index.html')));
     return;
   }
