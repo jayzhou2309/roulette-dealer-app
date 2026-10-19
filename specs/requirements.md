@@ -78,7 +78,7 @@ Format: user stories with EARS acceptance criteria. IDs trace to PRD sections.
 10. When the baseline model is selected, or all pockets are tied, the app shall show no pick.
 11. **Cost and payout:** Given a chip value per number (default 10), the app shall show for the pick and for the multi-number bet: cost per spin, amount paid back on a hit (36 × chip, straight up at 35 to 1), profit if it hits, loss if it misses, hit chance (model and fair wheel), expected result per spin at fair odds and under the model's estimate, and the net result of replaying the rule over the dealer's past spins.
 12. Saved estimates shall store the chip value and show the win/loss of the pick and the multi-number bet once scored.
-13. **Bet placement:** The betting-table layout shall mark where to place chips for the multi-number bet, using the fewest inside bets (straight up, split, trio, street, corner, six line) that cover exactly its numbers, each staked at one chip per number covered so cost and return match straight-up chips; a list shall give each placement's bet type, numbers, stake and payout. For a neighbours bet it shall note that the bet can be called to the dealer.
+13. **Bet placement:** The betting-table layout shall mark where to place chips for the multi-number bet, using the fewest inside bets (straight up, split, trio, street, corner, six line) that cover exactly its numbers, each staked with one chip; a list shall give each placement's bet type, numbers, odds, stake and amount paid back if it hits, and the total shall show the chips staked and the least amount paid back on any hit. For a neighbours bet it shall note that the bet can be called to the dealer.
 
 ## R6 Prediction history & evaluation (PRD §4.6, P1)
 

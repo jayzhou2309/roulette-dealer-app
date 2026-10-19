@@ -636,13 +636,19 @@
     const evCell = (x) => `<td class="r" style="color:${x < 0 ? 'var(--bad)' : x > 0 ? 'var(--good)' : 'inherit'}">${money(x)}</td>`;
     const KIND = { straight: 'Straight up', split: 'Split', trio: 'Trio', street: 'Street', corner: 'Corner', 'six line': 'Six line' };
     const place = C.betPlacement(sec.pockets, w).sort((a, b) => Math.min(...a.pockets.map(tablePos)) - Math.min(...b.pockets.map(tablePos)));
-    const placeHtml = `<div class="tbl-wrap"><table class="tbl place"><thead><tr><th>Chip</th><th>Bet</th><th class="r">Stake</th><th class="r">Pays</th></tr></thead><tbody>
-        ${place.map((b, i) => `<tr><td><span class="ctag">${CHIP_TAGS[i]}</span></td><td>${KIND[b.kind]} <span class="muted">${b.pockets.slice().sort((x, y) => tablePos(x) - tablePos(y)).map(C.label).join(' · ')}</span></td>
-          <td class="r num">${money(b.stakes * stake, false)}${b.stakes > 1 ? `<span class="muted small"> (${b.stakes}×)</span>` : ''}</td><td class="r">${b.pays} to 1</td></tr>`).join('')}
-        <tr class="tot"><td></td><td>${place.length} chip${place.length === 1 ? '' : 's'} on the felt</td><td class="r num">${money(k * stake, false)}</td><td class="r num">${money(36 * stake, false)} back</td></tr></tbody></table></div>
+    // One chip of `stake` per placement, so what comes back depends on which bet the number sits in.
+    const backOf = (b) => (b.pays + 1) * stake;
+    const placeCost = place.length * stake, leastBack = Math.min(...place.map(backOf)), mostBack = Math.max(...place.map(backOf));
+    const placeHtml = `<div class="tbl-wrap"><table class="tbl place"><thead><tr><th>Chip</th><th>Bet</th><th class="r">Stake</th><th class="r">Back if hit</th></tr></thead><tbody>
+        ${place.map((b, i) => `<tr><td><span class="ctag">${CHIP_TAGS[i]}</span></td><td>${KIND[b.kind]} <span class="muted">${b.pockets.slice().sort((x, y) => tablePos(x) - tablePos(y)).map(C.label).join(' · ')}</span><br><span class="small muted">${b.pays} to 1</span></td>
+          <td class="r num">${money(stake, false)}</td><td class="r num">${money(backOf(b), false)}</td></tr>`).join('')}
+        <tr class="tot"><td></td><td>${place.length} chip${place.length === 1 ? '' : 's'} on the felt</td><td class="r num">${money(placeCost, false)}</td><td class="r num">${leastBack < mostBack ? 'at least ' : ''}${money(leastBack, false)}</td></tr></tbody></table></div>
       <p class="small muted" style="margin:0">${place.length < k
         ? `Grouping neighbouring numbers on the layout into ${[...new Set(place.filter((b) => b.stakes > 1).map((b) => KIND[b.kind].toLowerCase() + 's'))].join(', ')} puts ${place.length} chips down instead of ${k}. `
-        : `These numbers don't sit next to each other on the layout, so each needs its own straight-up chip. `}Each bet carries one ${money(stake, false)} chip per number it covers, so the cost and the ${money(36 * stake, false)} returned on a hit are the same as ${k} straight-up chips.${opt.mode === 'neighbours'
+        : `These numbers don't sit next to each other on the layout, so each needs its own straight-up chip. `}One ${money(stake, false)} chip per placement. ${leastBack < mostBack
+        ? `A hit pays back between ${money(leastBack, false)} and ${money(mostBack, false)} depending on which bet covers the number; the least is ${money(leastBack, false)}, ${money(leastBack - placeCost)} after the ${money(placeCost, false)} staked.`
+        : `Any hit pays back ${money(leastBack, false)}, ${money(leastBack - placeCost)} after the ${money(placeCost, false)} staked.`}${place.length < k
+        ? ` The cost and payout table below assumes one chip on each number straight up instead.` : ''}${opt.mode === 'neighbours'
         ? ` At a European table you can also hand the dealer ${k} chips and call "${C.label(pk0.pocket)} and the neighbours".` : ''}</p>`;
     const costHtml = `<div class="stack" style="gap:8px">
         <label class="f" style="max-width:220px"><span>Chip per number</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
