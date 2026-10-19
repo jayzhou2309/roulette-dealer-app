@@ -210,13 +210,9 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 4
 .pk.is-pick { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
 .sector-row { gap: 6px; }
 .wheel-big { width: 100%; max-width: 320px; height: auto; margin: 0 auto; display: block; }
-.tmini { display: grid; grid-template-columns: 30px repeat(12, minmax(22px, 1fr)); grid-template-rows: repeat(6, 15px); gap: 2px; min-width: 330px; }
-.tm { display: grid; place-items: center; border-radius: 3px; color: #fff; font: 600 13px/1 var(--f-display); opacity: .2; }
-.tm.red { background: var(--pocket-red); }
-.tm.black { background: var(--pocket-black); }
-.tm.green { background: var(--pocket-green); }
-.tm.on { opacity: 1; }
-.tm.pick { opacity: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+.tmini { display: block; width: 100%; min-width: 330px; height: auto; }
+.ctag { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--surface); font: 700 11px/1 var(--f-body); }
+.tbl.place tr.tot td { border-top: 1px solid var(--line); font-weight: 600; }
 
 .tbl.money td:first-child { color: var(--muted); }
 .tbl.money tbody tr:nth-child(3) td, .tbl.money tbody tr:nth-child(7) td { border-top: 1px solid var(--line); }

@@ -350,6 +350,48 @@ const Core = (() => {
     return { cost, back, winProfit: back - cost, lossIfMiss: -cost, ev: pHit * back - cost };
   }
 
+  // Inside bets on the layout that cover only `numbers`, using as few placements as possible.
+  // Each bet gets one stake per number it covers, so cost and the return on a hit (36 stakes)
+  // match k straight-up chips exactly; only the number of chips on the felt changes.
+  function insideBets(w) {
+    const bets = [], add = (kind, ps) => bets.push({ kind, pockets: ps });
+    for (let n = 1; n <= 34; n += 3) {
+      if (n <= 31) add('six line', [n, n + 1, n + 2, n + 3, n + 4, n + 5]);
+      add('street', [n, n + 1, n + 2]);
+    }
+    for (let n = 1; n <= 32; n++) if (n % 3 !== 0) add('corner', [n, n + 1, n + 3, n + 4]);
+    if (w.size === 38) add('trio', [0, DOUBLE_ZERO, 2]);
+    else { add('trio', [0, 1, 2]); add('trio', [0, 2, 3]); }
+    for (let n = 1; n <= 36; n++) {
+      if (n % 3 !== 0) add('split', [n, n + 1]);
+      if (n <= 33) add('split', [n, n + 3]);
+    }
+    if (w.size === 38) for (const ps of [[0, DOUBLE_ZERO], [0, 1], [0, 2], [DOUBLE_ZERO, 2], [DOUBLE_ZERO, 3]]) add('split', ps);
+    else for (const n of [1, 2, 3]) add('split', [0, n]);
+    for (const p of w.pockets) add('straight', [p]);
+    return bets;
+  }
+
+  function betPlacement(numbers, w) {
+    const idx = new Map(numbers.map((p, i) => [p, i])), full = (1 << numbers.length) - 1;
+    const cands = insideBets(w).filter((b) => b.pockets.every((p) => idx.has(p)))
+      .map((b) => ({ ...b, mask: b.pockets.reduce((m, p) => m | (1 << idx.get(p)), 0) }));
+    const memo = new Map([[0, []]]);
+    const solve = (left) => {
+      if (memo.has(left)) return memo.get(left);
+      const low = left & -left;
+      let best = null;
+      for (const b of cands) {
+        if (!(b.mask & low) || (b.mask & left) !== b.mask) continue;
+        const rest = solve(left & ~b.mask);
+        if (!best || rest.length + 1 < best.length) best = [b, ...rest];
+      }
+      memo.set(left, best);
+      return best;
+    };
+    return solve(full).map(({ kind, pockets }) => ({ kind, pockets, stakes: pockets.length, pays: 36 / pockets.length - 1 }));
+  }
+
   // P(X >= h) for X ~ Binomial(m, p).
   function binomUpper(h, m, p) {
     if (h <= 0) return 1;
@@ -435,7 +477,7 @@ const Core = (() => {
     wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
     categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
     predict, logLoss, brier, backtest, evaluate, mean, rng, weightedCounts, DEFAULT_HALF_LIFE,
-    WHEEL_ORDER, pick, bestSector, betEconomics, binomUpper, pickBacktest, hotCold,
+    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, pickBacktest, hotCold,
   };
 })();
 

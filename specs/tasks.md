@@ -52,6 +52,9 @@ Order follows the PRD's direction: CRM and reliable spin history first, analytic
 - [x] T34 Core: `weightedCounts`, decay tracker, `weighted` model in predict/backtest, weighted pick record — R5.1, R5.9
 - [x] T35 Predict: model chip, half-life chips with weight-by-age readout, effective n, saved params — R5.1, R5.3
 
+## Phase 5f — Bet placement (change request)
+- [x] T36 Core `betPlacement` (minimum exact cover with inside bets, EU/US zero bets); SVG table with chips on lines and corners; placement list — R5.13
+
 ## Phase 6 — Ship
 - [x] T24 Build script inlines modules into `dist/index.html`
 - [x] T25 Playwright smoke test at phone width, light + dark

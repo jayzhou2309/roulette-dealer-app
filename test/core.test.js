@@ -294,3 +294,27 @@ test('weighted backtest and pick record match a brute-force replay', () => {
     assert.equal(pb.sectorHits, sh);
   }
 });
+
+test('betPlacement covers exactly the numbers with the fewest inside bets', () => {
+  const cover = (place) => place.flatMap((b) => b.pockets).sort((a, b) => a - b);
+  const p1 = C.betPlacement([17, 20, 18, 21], EU);
+  assert.deepEqual(p1.map((b) => b.kind), ['corner']);
+  assert.equal(p1[0].stakes, 4);
+  assert.equal(p1[0].pays, 8);
+  assert.deepEqual(C.betPlacement([1, 2, 3, 4, 5, 6], EU).map((b) => b.kind), ['six line']);
+  assert.deepEqual(C.betPlacement([0, 1, 2], EU).map((b) => b.kind), ['trio']);
+  assert.deepEqual(C.betPlacement([0, 37], US).map((b) => b.kind), ['split']);
+  // scattered numbers stay straight up
+  assert.deepEqual(C.betPlacement([0, 32, 15, 19, 4], EU).map((b) => b.kind), Array(5).fill('straight'));
+  // every neighbours / arc sector is covered exactly once, cost unchanged
+  for (const w of [EU, US]) {
+    const order = C.WHEEL_ORDER[w.type];
+    for (const k of [5, 7, 9, 12]) for (let s = 0; s < order.length; s++) {
+      const nums = Array.from({ length: k }, (_, j) => order[(s + j) % order.length]);
+      const place = C.betPlacement(nums, w);
+      assert.deepEqual(cover(place), nums.slice().sort((a, b) => a - b));
+      assert.equal(place.reduce((a, b) => a + b.stakes, 0), k);
+      for (const b of place) assert.equal((b.pays + 1) * b.stakes, 36);
+    }
+  }
+});

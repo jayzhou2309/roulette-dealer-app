@@ -233,13 +233,9 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 4
 .pk.is-pick { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
 .sector-row { gap: 6px; }
 .wheel-big { width: 100%; max-width: 320px; height: auto; margin: 0 auto; display: block; }
-.tmini { display: grid; grid-template-columns: 30px repeat(12, minmax(22px, 1fr)); grid-template-rows: repeat(6, 15px); gap: 2px; min-width: 330px; }
-.tm { display: grid; place-items: center; border-radius: 3px; color: #fff; font: 600 13px/1 var(--f-display); opacity: .2; }
-.tm.red { background: var(--pocket-red); }
-.tm.black { background: var(--pocket-black); }
-.tm.green { background: var(--pocket-green); }
-.tm.on { opacity: 1; }
-.tm.pick { opacity: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+.tmini { display: block; width: 100%; min-width: 330px; height: auto; }
+.ctag { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--surface); font: 700 11px/1 var(--f-body); }
+.tbl.place tr.tot td { border-top: 1px solid var(--line); font-weight: 600; }
 
 .tbl.money td:first-child { color: var(--muted); }
 .tbl.money tbody tr:nth-child(3) td, .tbl.money tbody tr:nth-child(7) td { border-top: 1px solid var(--line); }
@@ -614,6 +610,48 @@ const Core = (() => {
     return { cost, back, winProfit: back - cost, lossIfMiss: -cost, ev: pHit * back - cost };
   }
 
+  // Inside bets on the layout that cover only `numbers`, using as few placements as possible.
+  // Each bet gets one stake per number it covers, so cost and the return on a hit (36 stakes)
+  // match k straight-up chips exactly; only the number of chips on the felt changes.
+  function insideBets(w) {
+    const bets = [], add = (kind, ps) => bets.push({ kind, pockets: ps });
+    for (let n = 1; n <= 34; n += 3) {
+      if (n <= 31) add('six line', [n, n + 1, n + 2, n + 3, n + 4, n + 5]);
+      add('street', [n, n + 1, n + 2]);
+    }
+    for (let n = 1; n <= 32; n++) if (n % 3 !== 0) add('corner', [n, n + 1, n + 3, n + 4]);
+    if (w.size === 38) add('trio', [0, DOUBLE_ZERO, 2]);
+    else { add('trio', [0, 1, 2]); add('trio', [0, 2, 3]); }
+    for (let n = 1; n <= 36; n++) {
+      if (n % 3 !== 0) add('split', [n, n + 1]);
+      if (n <= 33) add('split', [n, n + 3]);
+    }
+    if (w.size === 38) for (const ps of [[0, DOUBLE_ZERO], [0, 1], [0, 2], [DOUBLE_ZERO, 2], [DOUBLE_ZERO, 3]]) add('split', ps);
+    else for (const n of [1, 2, 3]) add('split', [0, n]);
+    for (const p of w.pockets) add('straight', [p]);
+    return bets;
+  }
+
+  function betPlacement(numbers, w) {
+    const idx = new Map(numbers.map((p, i) => [p, i])), full = (1 << numbers.length) - 1;
+    const cands = insideBets(w).filter((b) => b.pockets.every((p) => idx.has(p)))
+      .map((b) => ({ ...b, mask: b.pockets.reduce((m, p) => m | (1 << idx.get(p)), 0) }));
+    const memo = new Map([[0, []]]);
+    const solve = (left) => {
+      if (memo.has(left)) return memo.get(left);
+      const low = left & -left;
+      let best = null;
+      for (const b of cands) {
+        if (!(b.mask & low) || (b.mask & left) !== b.mask) continue;
+        const rest = solve(left & ~b.mask);
+        if (!best || rest.length + 1 < best.length) best = [b, ...rest];
+      }
+      memo.set(left, best);
+      return best;
+    };
+    return solve(full).map(({ kind, pockets }) => ({ kind, pockets, stakes: pockets.length, pays: 36 / pockets.length - 1 }));
+  }
+
   // P(X >= h) for X ~ Binomial(m, p).
   function binomUpper(h, m, p) {
     if (h <= 0) return 1;
@@ -699,7 +737,7 @@ const Core = (() => {
     wheel, label, parsePocket, colorOf, isZero, activeSpins, windowed, counts,
     categoryStats, categoryProbs, streaks, gaps, chiSquare, gammaQ, wilson,
     predict, logLoss, brier, backtest, evaluate, mean, rng, weightedCounts, DEFAULT_HALF_LIFE,
-    WHEEL_ORDER, pick, bestSector, betEconomics, binomUpper, pickBacktest, hotCold,
+    WHEEL_ORDER, pick, bestSector, betEconomics, betPlacement, binomUpper, pickBacktest, hotCold,
   };
 })();
 
@@ -1251,6 +1289,7 @@ if (typeof module !== 'undefined') module.exports = Core;
     const t = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     return sign ? (v > 0 ? '+' : v < 0 ? '−' : '') + t : t;
   };
+  const tablePos = (p) => (p === C.DOUBLE_ZERO ? -1 : p);
   const POCKET_FILL = { red: 'var(--pocket-red)', black: 'var(--pocket-black)', green: 'var(--pocket-green)' };
 
   // The wheel as seen from above, sector lit and everything else dimmed.
@@ -1282,19 +1321,44 @@ if (typeof module !== 'undefined') module.exports = Core;
       <text y="22" text-anchor="middle" fill="var(--fg)" font-size="56" font-weight="600" font-family="var(--f-display)">${C.label(pickP)}</text></svg>`;
   }
 
-  // Betting-table layout (zero column, then 12 columns of 3) with the sector lit.
-  function tableMini(w, sector, pickP) {
-    const on = new Set(sector.pockets);
-    const cell = (p, style) => `<span class="tm ${C.colorOf(p)}${on.has(p) ? ' on' : ''}${p === pickP ? ' pick' : ''}" style="${style}">${C.label(p)}</span>`;
-    const zeros = w.size === 38
-      ? cell(C.DOUBLE_ZERO, 'grid-row:1 / 4;grid-column:1') + cell(0, 'grid-row:4 / 7;grid-column:1')
-      : cell(0, 'grid-row:1 / 7;grid-column:1');
-    let nums = '';
-    for (let col = 0; col < 12; col++) for (let row = 0; row < 3; row++) {
-      const p = col * 3 + (3 - row);
-      nums += cell(p, `grid-row:${row * 2 + 1} / span 2;grid-column:${col + 2}`);
-    }
-    return `<div class="tbl-wrap"><div class="tmini" aria-label="Betting table with sector numbers highlighted">${zeros}${nums}</div></div>`;
+  // Betting-table layout (zero column, then 12 columns of 3) with the sector lit and chips placed.
+  const CHIP_TAGS = 'ABCDEFGHIJKL';
+  function tableMini(w, sector, pickP, place) {
+    const Z = 30, CW = 26, RH = 30, H = 3 * RH, on = new Set(sector.pockets), us = w.size === 38;
+    const box = (p) => {
+      if (p === 0) return us ? [0, H / 2, Z, H / 2] : [0, 0, Z, H];
+      if (p === C.DOUBLE_ZERO) return [0, 0, Z, H / 2];
+      const c = Math.floor((p - 1) / 3), r = 2 - ((p - 1) % 3);
+      return [Z + c * CW, r * RH, CW, RH];
+    };
+    const ctr = (p) => { const [x, y, bw, bh] = box(p); return [x + bw / 2, y + bh / 2]; };
+    const solo = new Set(place.filter((b) => b.kind === 'straight').map((b) => b.pockets[0]));
+    const cell = (p) => {
+      const [x, y, bw, bh] = box(p), lit = on.has(p) || p === pickP, ty = solo.has(p) ? Math.min(y + 9, y + bh / 2 - 6) : y + bh / 2;
+      return `<g opacity="${lit ? 1 : 0.2}"><rect x="${x + 1}" y="${y + 1}" width="${bw - 2}" height="${bh - 2}" rx="3" fill="${POCKET_FILL[C.colorOf(p)]}"${p === pickP ? ' stroke="var(--accent)" stroke-width="2.5"' : ''}/>
+        <text x="${x + bw / 2}" y="${ty}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="12.5" font-weight="600" font-family="var(--f-display)">${C.label(p)}</text></g>`;
+    };
+    // Where the dealer expects each chip: on the shared line, corner or outer edge of its numbers.
+    const spot = (b) => {
+      const ps = b.pockets;
+      if (ps.includes(0) || ps.includes(C.DOUBLE_ZERO)) {
+        const nums = ps.filter((p) => !C.isZero(p));
+        if (!nums.length) return [Z / 2, H / 2];
+        const y = nums.reduce((a, p) => a + ctr(p)[1], 0) / nums.length;
+        if (!us || nums.length > 1 || ps.length > 2) return [Z, y];
+        return [Z, y + (ps.includes(0) ? 1 : -1) * (nums[0] === 2 ? 8 : 0)];
+      }
+      if (b.kind === 'straight') { const [x, y, , bh] = box(ps[0]); return [x + box(ps[0])[2] / 2, Math.max(y + 21, y + bh / 2 + 7)]; }
+      if (b.kind === 'street' || b.kind === 'six line') return [ps.reduce((a, p) => a + ctr(p)[0], 0) / ps.length, H];
+      return ps.reduce(([ax, ay], p) => { const [x, y] = ctr(p); return [ax + x / ps.length, ay + y / ps.length]; }, [0, 0]);
+    };
+    const chips = place.map((b, i) => {
+      const [x, y] = spot(b), r = b.kind === 'straight' ? 7.5 : 8.5;
+      return `<g><circle cx="${x}" cy="${y}" r="${r}" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><circle cx="${x}" cy="${y}" r="${r - 3}" fill="none" stroke="var(--surface)" stroke-width="1" stroke-dasharray="2 1.6" opacity=".8"/>
+        <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" fill="var(--surface)" font-size="${r > 8 ? 9 : 8}" font-weight="700" font-family="var(--f-body)">${CHIP_TAGS[i]}</text></g>`;
+    }).join('');
+    return `<div class="tbl-wrap"><svg class="tmini" viewBox="-2 -2 ${Z + 12 * CW + 4} ${H + 13}" role="img" aria-label="Betting table with the suggested numbers lit and ${place.length} chip placement${place.length === 1 ? '' : 's'} marked">
+      ${w.pockets.map(cell).join('')}${chips}</svg></div>`;
   }
 
   function renderPick(d, w, probs, pockets, win, all) {
@@ -1317,6 +1381,16 @@ if (typeof module !== 'undefined') module.exports = Core;
     const secName = opt.mode === 'neighbours' ? 'Neighbours' : opt.mode === 'top' ? `Top ${k}` : `Best ${k}`;
     const pastPick = bt.pickHits * e1.back - bt.scored * e1.cost, pastK = bt.sectorHits * eK.back - bt.scored * eK.cost;
     const evCell = (x) => `<td class="r" style="color:${x < 0 ? 'var(--bad)' : x > 0 ? 'var(--good)' : 'inherit'}">${money(x)}</td>`;
+    const KIND = { straight: 'Straight up', split: 'Split', trio: 'Trio', street: 'Street', corner: 'Corner', 'six line': 'Six line' };
+    const place = C.betPlacement(sec.pockets, w).sort((a, b) => Math.min(...a.pockets.map(tablePos)) - Math.min(...b.pockets.map(tablePos)));
+    const placeHtml = `<div class="tbl-wrap"><table class="tbl place"><thead><tr><th>Chip</th><th>Bet</th><th class="r">Stake</th><th class="r">Pays</th></tr></thead><tbody>
+        ${place.map((b, i) => `<tr><td><span class="ctag">${CHIP_TAGS[i]}</span></td><td>${KIND[b.kind]} <span class="muted">${b.pockets.slice().sort((x, y) => tablePos(x) - tablePos(y)).map(C.label).join(' · ')}</span></td>
+          <td class="r num">${money(b.stakes * stake, false)}${b.stakes > 1 ? `<span class="muted small"> (${b.stakes}×)</span>` : ''}</td><td class="r">${b.pays} to 1</td></tr>`).join('')}
+        <tr class="tot"><td></td><td>${place.length} chip${place.length === 1 ? '' : 's'} on the felt</td><td class="r num">${money(k * stake, false)}</td><td class="r num">${money(36 * stake, false)} back</td></tr></tbody></table></div>
+      <p class="small muted" style="margin:0">${place.length < k
+        ? `Grouping neighbouring numbers on the layout into ${[...new Set(place.filter((b) => b.stakes > 1).map((b) => KIND[b.kind].toLowerCase() + 's'))].join(', ')} puts ${place.length} chips down instead of ${k}. `
+        : `These numbers don't sit next to each other on the layout, so each needs its own straight-up chip. `}Each bet carries one ${money(stake, false)} chip per number it covers, so the cost and the ${money(36 * stake, false)} returned on a hit are the same as ${k} straight-up chips.${opt.mode === 'neighbours'
+        ? ` At a European table you can also hand the dealer ${k} chips and call "${C.label(pk0.pocket)} and the neighbours".` : ''}</p>`;
     const costHtml = `<div class="stack" style="gap:8px">
         <label class="f" style="max-width:220px"><span>Chip per number</span><input class="in num" id="stake" type="number" min="0.01" step="any" inputmode="decimal" value="${stake}"></label>
         <div class="tbl-wrap"><table class="tbl money"><thead><tr><th></th><th class="r">Pick ${C.label(pk0.pocket)}</th><th class="r">${secName} (${k})</th></tr></thead><tbody>
@@ -1353,7 +1427,7 @@ if (typeof module !== 'undefined') module.exports = Core;
       <div class="stack" style="gap:6px"><span class="eyebrow">${opt.mode === 'neighbours' ? `Neighbours bet · ${C.label(pk0.pocket)} and 2 either side, in wheel order` : opt.mode === 'top' ? `Top ${k} numbers by estimate, best first` : `Strongest ${k}-pocket stretch of the wheel, in wheel order`}</span>
         <div class="row sector-row">${sec.pockets.map((p) => pk(p, p === pk0.pocket ? 'lg is-pick' : 'lg')).join('')}</div>
         <span class="small">Covers ${k} of ${w.size} pockets: <b class="num">${pct(sec.p)}</b> estimate vs <span class="num">${pct(sec.base)}</span> fair.${sec.hasPick ? '' : ' The pick sits outside this stretch.'}</span></div>
-      <div class="stack" style="gap:6px"><span class="eyebrow">On the table</span>${tableMini(w, sec, pk0.pocket)}</div>
+      <div class="stack" style="gap:6px"><span class="eyebrow">On the table · where to place the chips</span>${tableMini(w, sec, pk0.pocket, place)}${placeHtml}</div>
       <div class="stack" style="gap:6px"><span class="eyebrow">Cost and payout</span>${costHtml}</div>
       <div class="stack" style="gap:6px"><span class="eyebrow">Track record on this dealer</span>${record}</div>
     </section>`;
